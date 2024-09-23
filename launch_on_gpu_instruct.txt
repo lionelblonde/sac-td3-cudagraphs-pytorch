@@ -1,0 +1,1 @@
+python main.py train --cfg="tasks/gpu.yml" --env_id="Walker2d-v4" --seed=0
