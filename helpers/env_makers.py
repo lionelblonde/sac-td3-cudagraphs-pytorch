@@ -1,5 +1,3 @@
-import os
-from pathlib import Path
 from typing import Union, Optional
 
 import numpy as np
@@ -61,9 +59,9 @@ DEEPMIND_MUJOCO.extend([f"{name}-Pix-v0"
     for name in DEEPMIND_MUJOCO_STEM])
 
 # Flag benchmarks that are not available yet
-BENCHMARKS = {"farama": FARAMA_MUJOCO, "dmc": DEEPMIND_MUJOCO}
-AVAILABLE_FLAGS = dict.fromkeys(BENCHMARKS, False)
-AVAILABLE_FLAGS["dmc"] = False  # TODO(lionel): integrate with the DMC suite
+BENCHMARKS = {"farama_mujoco": FARAMA_MUJOCO, "deepmind_mujoco": DEEPMIND_MUJOCO}
+AVAILABLE_FLAGS = dict.fromkeys(BENCHMARKS, True)
+AVAILABLE_FLAGS["deepmind_mujoco"] = False  # TODO(lionel): integrate with the DMC suite
 
 
 @beartype
@@ -75,7 +73,7 @@ def get_benchmark(env_id: str):
             benchmark = k
             continue
     assert benchmark is not None, "unsupported environment"
-    assert not AVAILABLE_FLAGS[benchmark], "unavailable benchmark"
+    assert AVAILABLE_FLAGS[benchmark], "unavailable benchmark"
     return benchmark
 
 
@@ -87,7 +85,6 @@ def make_env(
     vectorized: bool,
     multi_proc: bool,
     num_env: Optional[int] = None,
-    wrap_absorb: bool,
     record: bool,
     render: bool,
     ) -> tuple[Union[Env, AsyncVectorEnv],
@@ -97,22 +94,12 @@ def make_env(
     bench = get_benchmark(env_id)  # at this point benchmark is valid
 
     if bench == "farama_mujoco":
-        # remove the lockfile if it exists (maybe not a thing in Farama's Gymnasium anymore?)
-        lockfile = (Path(os.environ["CONDA_PREFIX"]) / "lib" / "python3.7" / "site-packages" /
-                    "mujoco_py" / "generated" / "mujocopy-buildlock.lock")
-        try:
-            Path(lockfile).unlink()
-            logger.info("[WARN] removed mujoco lockfile")
-        except OSError:
-            pass
-
         return make_farama_mujoco_env(
             env_id,
             horizon,
             vectorized=vectorized,
             multi_proc=multi_proc,
             num_env=num_env,
-            wrap_absorb=wrap_absorb,
             record=record,
             render=render,
         )
@@ -127,7 +114,6 @@ def make_farama_mujoco_env(
     vectorized: bool,
     multi_proc: bool,
     num_env: Optional[int],
-    wrap_absorb: bool,
     record: bool,
     render: bool,
     ) -> tuple[Union[Env, AsyncVectorEnv],
@@ -180,29 +166,13 @@ def make_farama_mujoco_env(
     net_shapes.update({"ob_shape": ob_shape, "ac_shape": ac_shape})
 
     # for the replay buffer
-    ob_dim = ob_dim_orig = ob_shape[-1]
-    ac_dim = ac_dim_orig = ac_shape[-1]  # for both: num dims
-    if wrap_absorb:
-        ob_dim += 1
-        ac_dim += 1
-        erb_shapes.update({
-            "obs0": (ob_dim,),
-            "obs1": (ob_dim,),
-            "acs": (ac_dim,),
-            "rews": (1,),
-            "dones1": (1,),
-            "obs0_orig": (ob_dim_orig,),
-            "obs1_orig": (ob_dim_orig,),
-            "acs_orig": (ac_dim_orig,),
-        })
-    else:
-        erb_shapes.update({
-            "obs0": (ob_dim,),
-            "obs1": (ob_dim,),
-            "acs": (ac_dim,),
-            "rews": (1,),
-            "dones1": (1,),
-        })
+    erb_shapes.update({
+        "obs0": (ob_shape[-1],),
+        "obs1": (ob_shape[-1],),
+        "acs": (ac_shape[-1],),
+        "rews": (1,),
+        "dones1": (1,),
+    })
 
     # max value for action
     max_ac = max(

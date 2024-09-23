@@ -62,8 +62,6 @@ class MagicRunner(object):
     def __init__(self, cfg: str,  # give the relative path to cfg here
                  env_id: str,  # never in cfg: always give one in arg
                  seed: int,  # never in cfg: always give one in arg
-                 num_demos: int,  # never in cfg: always give one arg
-                 expert_path: str,  # never in cfg: always give one arg
                  wandb_project: Optional[str] = None,  # is either given in arg (prio) or in cfg
                  uuid: Optional[str] = None,  # never in cfg, but not forced to give in arg either
                  load_ckpt: Optional[str] = None):  # same as uuid: from arg or nothing
@@ -87,8 +85,6 @@ class MagicRunner(object):
         # set only if nonexistant key in cfg
         self._cfg.seed = seed
         self._cfg.env_id = env_id
-        self._cfg.num_demos = num_demos
-        self._cfg.expert_path = expert_path
 
         assert "wandb_project" in self._cfg  # if not in cfg from fs, abort
         if wandb_project is not None:
@@ -122,7 +118,7 @@ class MagicRunner(object):
         np.set_printoptions(precision=3)
 
         # name
-        name = f"{self.name}.train_demos{str(self._cfg.num_demos).zfill(3)}"
+        name = f"{self.name}.train"
         # logger
         if self.DISABLE_LOGGER:
             logger.set_level(logger.DISABLED)  # turn the logging off
@@ -159,7 +155,6 @@ class MagicRunner(object):
             vectorized=self._cfg.vectorized,
             multi_proc=self._cfg.multi_proc,
             num_env=self._cfg.num_env,
-            wrap_absorb=self._cfg.wrap_absorb,
             record=False,
             render=self._cfg.render,
         )
@@ -204,7 +199,6 @@ class MagicRunner(object):
             horizon=1000,
             vectorized=False,
             multi_proc=False,
-            wrap_absorb=self._cfg.wrap_absorb,
             record=self._cfg.record,
             render=self._cfg.render,
         )
@@ -256,7 +250,6 @@ class MagicRunner(object):
             horizon=1000,
             vectorized=False,
             multi_proc=False,
-            wrap_absorb=self._cfg.wrap_absorb,
             record=self._cfg.record,
             render=self._cfg.render,
         )

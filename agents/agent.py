@@ -73,7 +73,6 @@ class Agent(object):
         assert self.hps.segment_len <= self.hps.batch_size
         if self.hps.clip_norm <= 0:
             logger.info("clip_norm <= 0, hence disabled")
-        assert 0. <= float(self.hps.d_label_smooth) <= 1.
 
         # replay buffer
         self.replay_buffers = replay_buffers
@@ -133,7 +132,7 @@ class Agent(object):
         self.actr_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.actr_opt,
             (t_max := ((self.MAGIC_FACTOR * self.hps.num_timesteps * self.hps.actor_update_delay) /
-                       (self.hps.training_steps_per_iter * self.hps.g_steps))),
+                       (self.hps.training_steps_per_iter))),
         )
         logger.info(f"{t_max = }")
 
