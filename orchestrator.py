@@ -203,10 +203,12 @@ def episode(env: Env,
     ac_low, ac_high = env.action_space.low, env.action_space.high
 
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
-    logger.warn("remember: in episode generator, we generate a seed randomly")
-    logger.warn("i.e. not using 'ob, _ = env.reset(seed=seed)' with same seed")
-    # note that despite sampling a new seed, it is using a seeded rng: reproducible
-    ob, _ = env.reset(seed=seed + rng.integers(100000, size=1).item())
+
+    def randomize_seed() -> int:
+        return seed + rng.integers(100000, size=1).item()
+        # seeded Generator: deterministic -> reproducible
+
+    ob, _ = env.reset(seed=randomize_seed())
 
     cur_ep_len = 0
     cur_ep_env_ret = 0
@@ -251,9 +253,8 @@ def episode(env: Env,
             obs = []
             acs = []
             env_rews = []
-            logger.warn("remember: in episode generator, we generate a seed randomly")
-            logger.warn("i.e. not using 'ob, _ = env.reset(seed=seed)' with same seed")
-            ob, _ = env.reset(seed=seed + rng.integers(100000, size=1).item())
+
+            ob, _ = env.reset(seed=randomize_seed())
 
 
 @beartype
