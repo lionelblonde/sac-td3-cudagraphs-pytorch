@@ -21,8 +21,7 @@ def record_video(save_dir: Path, name: str, obs: np.ndarray):
 
     # create OpenCV video writer
     vname = f"render-{name}"
-    frame_size = (obs.shape[-2],
-                 obs.shape[-3])
+    frame_size = (obs.shape[-2], obs.shape[-3])
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(
         filename=f"{save_dir / vname}.mp4",
