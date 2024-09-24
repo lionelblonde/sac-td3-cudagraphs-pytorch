@@ -184,7 +184,11 @@ def postproc_vtr(num_envs: int,
 def postproc_tr(tr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
     ob, ac, new_ob, rew, terminated = tr
     return [
-        {"obs0": ob, "acs": ac, "obs1": new_ob, "rew": rew, "dones1": terminated}]
+        {"obs0": ob,
+         "acs": ac,
+         "obs1": new_ob,
+         "rews": rew,
+         "dones1": terminated}]
 
 
 @beartype
