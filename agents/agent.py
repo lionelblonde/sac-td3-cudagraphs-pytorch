@@ -61,13 +61,11 @@ class Agent(object):
         assert isinstance(hps, DictConfig)
         self.hps = hps
 
-        # define the out grads used by grad pen here not to always redefine them
-        self.go = rearrange(torch.ones(
-            self.hps.batch_size * self.hps.num_env), "b -> b 1").to(self.device)
-
         self.timesteps_so_far = 0
         self.actr_updates_so_far = 0
         self.crit_updates_so_far = 0
+
+        self.best_eval_ep_ret = -np.inf  # updated in orchastrator
 
         assert self.hps.lookahead > 1 or not self.hps.n_step_returns
         assert self.hps.segment_len <= self.hps.batch_size
@@ -360,14 +358,14 @@ class Agent(object):
                     targ_param.copy_(new_param)
 
     @beartype
-    def save_to_path(self, path: Path, xtra: Optional[str] = None):
+    def save_to_path(self, path: Path, sfx: Optional[str] = None):
         """Save the agent to disk"""
         # prep checkpoint
-        suffix = f"checkpoint_{self.timesteps_so_far}"
-        if xtra is not None:
-            suffix += f"_{xtra}"
-        suffix += ".tar"
-        path = path / suffix
+        fname = (f"ckpt_{sfx}"
+                 if sfx is not None
+                 else f".ckpt_{self.timesteps_so_far}ts")
+        # design choice: hide the ckpt saved without an extra qualifier
+        path = path / f"{fname}.pth"
         checkpoint = {
             "hps": self.hps,  # handy for archeology
             "timesteps_so_far": self.timesteps_so_far,
@@ -406,9 +404,9 @@ class Agent(object):
                 if "twin_opt" in checkpoint:
                     self.twin_opt.load_state_dict(checkpoint["twin_opt"])
                 else:
-                    logger.warn("twin opt is missing from the loaded tar!")
+                    logger.warn("twin opt is missing from the loaded ckpt!")
                     logger.warn("we move on nonetheless, from a fresh opt")
             else:
-                raise IOError("no twin found in checkpoint tar file")
+                raise IOError("no twin found in checkpoint ckpt file")
         elif "twin" in checkpoint:  # in the case where clipped double is off
-            logger.warn("there is a twin the loaded tar, but you want none")
+            logger.warn("there is a twin the loaded ckpt, but you want none")

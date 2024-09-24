@@ -365,7 +365,7 @@ def learn(cfg: DictConfig,
         vid_dir.mkdir(parents=True, exist_ok=True)
 
     # save the model as a dry run, to avoid bad surprises at the end
-    agent.save_to_path(ckpt_dir, xtra="dryrun")
+    agent.save_to_path(ckpt_dir, sfx="dryrun")
     logger.info(f"dry run. saving model @:\n{ckpt_dir}")
 
     # group by everything except the seed, which is last, hence index -1
@@ -463,6 +463,11 @@ def learn(cfg: DictConfig,
                 len_buff.append(ep["ep_len"])
                 ret_buff.append(ep["ep_ret"])
 
+                if (new_best := ep["ep_ret"]) > agent.best_eval_ep_ret:
+                    # save the new best model
+                    agent.best_eval_ep_ret = new_best
+                    agent.save_to_path(ckpt_dir, sfx="best")
+
                 if cfg.record:
                     # record a video of the episode
                     # ref: https://younis.dev/blog/render-api/
@@ -495,5 +500,5 @@ def learn(cfg: DictConfig,
         logger.info()
 
     # save once we are done
-    agent.save_to_path(ckpt_dir, xtra="done")
+    agent.save_to_path(ckpt_dir, sfx="done")
     logger.info(f"we are done. saving model @:\n{ckpt_dir}\nbye.")
