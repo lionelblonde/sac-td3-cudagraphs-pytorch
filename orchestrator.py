@@ -366,7 +366,7 @@ def learn(cfg: DictConfig,
 
     # save the model as a dry run, to avoid bad surprises at the end
     agent.save_to_path(ckpt_dir, sfx="dryrun")
-    logger.info(f"dry run. saving model @:\n{ckpt_dir}")
+    logger.info(f"dry run -- saved model @:\n{ckpt_dir}")
 
     # group by everything except the seed, which is last, hence index -1
     # it groups by uuid + gitSHA + env_id
@@ -467,6 +467,7 @@ def learn(cfg: DictConfig,
                     # save the new best model
                     agent.best_eval_ep_ret = new_best
                     agent.save_to_path(ckpt_dir, sfx="best")
+                    logger.info(f"new best eval! -- saved model @:\n{ckpt_dir}")
 
                 if cfg.record:
                     # record a video of the episode
@@ -501,4 +502,4 @@ def learn(cfg: DictConfig,
 
     # save once we are done
     agent.save_to_path(ckpt_dir, sfx="done")
-    logger.info(f"we are done. saving model @:\n{ckpt_dir}\nbye.")
+    logger.info(f"we are done -- saved model @:\n{ckpt_dir}\nbye.")
