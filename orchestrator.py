@@ -370,7 +370,9 @@ def learn(cfg: DictConfig,
 
     # group by everything except the seed, which is last, hence index -1
     # it groups by uuid + gitSHA + env_id
-    group = ".".join(name.split(".")[:-1])
+    group = ".".join((ename := name).split(".")[:-1])  # nitpicking walrus for alignment
+    logger.warn(f"{ename=}")
+    logger.warn(f"{group=}")
     # set up wandb
     os.environ["WANDB__SERVICE_WAIT"] = "300"
     while True:

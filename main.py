@@ -117,13 +117,11 @@ class MagicRunner(object):
         # set printing options
         np.set_printoptions(precision=3)
 
-        # name
-        name = f"{self.name}.train"
         # logger
         if self.DISABLE_LOGGER:
             logger.set_level(logger.DISABLED)  # turn the logging off
         else:
-            log_path = Path(self._cfg.log_dir) / name
+            log_path = Path(self._cfg.log_dir) / self.name
             log_path.mkdir(parents=True, exist_ok=True)
             logger.configure(directory=log_path, format_strs=["stdout", "log", "json", "csv"])
             logger.set_level(self.LOGGER_LEVEL)
@@ -211,7 +209,7 @@ class MagicRunner(object):
             eval_env=eval_env,
             agent_wrapper=agent_wrapper,
             timer_wrapper=timer_wrapper,
-            name=name,
+            name=self.name,
         )
 
         # cleanup
@@ -227,8 +225,6 @@ class MagicRunner(object):
         # set printing options
         np.set_printoptions(precision=3)
 
-        # name
-        name = f"{self.name}.eval_trajs{str(self._cfg['num_trajs']).zfill(2)}"
         # logger
         if self.DISABLE_LOGGER:
             logger.set_level(logger.DISABLED)  # turn the logging off
@@ -271,7 +267,7 @@ class MagicRunner(object):
             cfg=self._cfg,
             env=env,
             agent_wrapper=agent_wrapper,
-            name=name,
+            name=self.name,
         )
 
         # cleanup
