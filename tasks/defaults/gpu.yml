@@ -14,6 +14,7 @@ domain_random: true
 wandb_project: "calico"
 record: false
 render: false
+gather: false
 
 # training
 num_timesteps: 10000000

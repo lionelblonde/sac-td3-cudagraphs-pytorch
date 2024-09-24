@@ -38,7 +38,7 @@ def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
             hf.create_dataset(key, data=data[key])
 
 
-gather_rolls = save_dict_h5py  # alias
+gather_roll = save_dict_h5py  # alias
 
 
 @beartype
@@ -273,7 +273,7 @@ def evaluate(cfg: DictConfig,
 
     assert isinstance(cfg, DictConfig)
 
-    rol_dir = Path(cfg.rolls_dir) / name
+    rol_dir = Path(cfg.roll_dir) / name
     if cfg.gather:
         rol_dir.mkdir(parents=True, exist_ok=True)
 
@@ -309,7 +309,7 @@ def evaluate(cfg: DictConfig,
 
         if cfg.gather:
             # gather episode in file
-            gather_rolls(rol_dir, str(i), traj)
+            gather_roll(rol_dir, str(i), traj)
 
         if cfg.record:
             # record a video of the episode
