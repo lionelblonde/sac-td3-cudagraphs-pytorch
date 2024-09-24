@@ -196,7 +196,7 @@ def episode(env: Env,
             agent: Agent,
             seed: int,
             *,
-            robustness_test: bool = False):
+            domain_random: bool = False):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
@@ -207,11 +207,11 @@ def episode(env: Env,
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
 
     def randomize_seed() -> int:
-        logger.warn("performing robustness test")
+        logger.warn("randomizing seed")
         return seed + rng.integers(2**32 - 1, size=1).item()
         # seeded Generator: deterministic -> reproducible
 
-    ob, _ = env.reset(seed=randomize_seed() if robustness_test else seed)
+    ob, _ = env.reset(seed=randomize_seed() if domain_random else seed)
 
     cur_ep_len = 0
     cur_ep_env_ret = 0
@@ -257,7 +257,7 @@ def episode(env: Env,
             acs = []
             env_rews = []
 
-            ob, _ = env.reset(seed=randomize_seed() if robustness_test else seed)
+            ob, _ = env.reset(seed=randomize_seed() if domain_random else seed)
 
 
 @beartype
@@ -381,7 +381,7 @@ def learn(cfg: DictConfig,
     # create episode generator for evaluating the agent
     eval_seed = cfg.seed + 123456  # arbitrary choice
     ep_gen = episode(
-        eval_env, agent, eval_seed, robustness_test=cfg.robustness_test)
+        eval_env, agent, eval_seed, domain_random=cfg.domain_random)
 
     i = 0
 
