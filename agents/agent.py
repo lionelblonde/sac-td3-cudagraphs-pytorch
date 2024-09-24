@@ -270,10 +270,9 @@ class Agent(object):
 
         with torch.no_grad():
             # define inputs
-            sfx = "_orig" if self.hps.wrap_absorb else ""
-            state = trns_batch[f"obs0{sfx}"]
-            next_state = trns_batch[f"obs1{sfx}"]
-            action = trns_batch[f"acs{sfx}"]
+            state = trns_batch["obs0"]
+            next_state = trns_batch["obs1"]
+            action = trns_batch["acs"]
             reward = trns_batch["rews"]
             done = trns_batch["dones1"].float()
             td_len = trns_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
