@@ -168,9 +168,9 @@ def make_farama_mujoco_env(
     # for the replay buffer
     erb_shapes.update({
         "obs0": (ob_shape[-1],),
+        "acs0": (ac_shape[-1],),
         "obs1": (ob_shape[-1],),
-        "acs": (ac_shape[-1],),
-        "rews": (1,),
+        "erews1": (1,),
         "dones1": (1,),
     })
 

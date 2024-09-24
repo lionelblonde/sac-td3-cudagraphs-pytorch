@@ -171,7 +171,7 @@ class MagicRunner(object):
             logger.info(f"rb#{i} [{rb}] is set")
 
         # perform quick sanity check on a ring buffer data structure
-        replay_buffers[0].ring_buffers["acs"].sanity_check_ringbuffer()
+        replay_buffers[0].ring_buffers["acs0"].sanity_check_ringbuffer()
 
         @beartype
         def agent_wrapper() -> Agent:

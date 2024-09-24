@@ -271,9 +271,9 @@ class Agent(object):
         with torch.no_grad():
             # define inputs
             state = trns_batch["obs0"]
+            action = trns_batch["acs0"]
             next_state = trns_batch["obs1"]
-            action = trns_batch["acs"]
-            reward = trns_batch["rews"]
+            reward = trns_batch["erews1"]
             done = trns_batch["dones1"].float()
             td_len = trns_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
             # update the observation normalizer

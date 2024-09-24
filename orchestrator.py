@@ -134,6 +134,7 @@ def segment(env: Union[Env, VectorEnv],
         else:
             done = np.logical_or(terminated, truncated)  # might not be used but diagnostics
             done, terminated = rearrange(done, "b -> b 1"), rearrange(terminated, "b -> b 1")
+            # `done` is technically not used, but this quiets down the type-checker
         # read about what truncation means at the link below:
         # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
 
@@ -190,9 +191,9 @@ def postproc_tr(tr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
     ob, ac, new_ob, rew, terminated = tr
     return [
         {"obs0": ob,
-         "acs": ac,
+         "acs0": ac,
          "obs1": new_ob,
-         "rews": rew,
+         "erews1": rew,
          "dones1": terminated}]
 
 
@@ -219,10 +220,12 @@ def episode(env: Env,
     ob, _ = env.reset(seed=randomize_seed() if domain_random else seed)
 
     cur_ep_len = 0
-    cur_ep_env_ret = 0
-    obs = []
-    acs = []
-    env_rews = []
+    cur_ep_ret = 0
+    obs0 = []
+    acs0 = []
+    obs1 = []
+    erews1 = []
+    dones1 = []
 
     while True:
 
@@ -232,35 +235,41 @@ def episode(env: Env,
         ac = np.nan_to_num(ac)
         ac = np.clip(ac, ac_low, ac_high)
 
-        obs.append(ob)
-        acs.append(ac)
-        new_ob, env_rew, terminated, truncated, _ = env.step(ac)
+        obs0.append(ob)
+        acs0.append(ac)
+        new_ob, erew, terminated, truncated, _ = env.step(ac)
         done = terminated or truncated
-
-        env_rews.append(env_rew)
+        dones1.append(done)
+        erews1.append(erew)
         cur_ep_len += 1
-        assert isinstance(env_rew, float)  # quiets the type-checker
-        cur_ep_env_ret += env_rew
+        assert isinstance(erew, float)  # quiets the type-checker
+        cur_ep_ret += erew
         ob = deepcopy(new_ob)
 
         if done:
-            obs = np.array(obs)
-            acs = np.array(acs)
-            env_rews = np.array(env_rews)
+            obs0 = np.array(obs0)
+            acs0 = np.array(acs0)
+            obs1 = np.array(obs1)
+            erews1 = np.array(erews1)
+            dones1 = np.array(dones1)
             out = {
-                "obs": obs,
-                "acs": acs,
-                "env_rews": env_rews,
+                "obs0": obs0,
+                "acs0": acs0,
+                "obs1": obs1,
+                "erews1": erews1,
+                "dones1": dones1,
                 "ep_len": cur_ep_len,
-                "ep_env_ret": cur_ep_env_ret,
+                "ep_ret": cur_ep_ret,
             }
             yield out
 
             cur_ep_len = 0
-            cur_ep_env_ret = 0
-            obs = []
-            acs = []
-            env_rews = []
+            cur_ep_ret = 0
+            obs0 = []
+            acs0 = []
+            obs1 = []
+            erews1 = []
+            dones1 = []
 
             ob, _ = env.reset(seed=randomize_seed() if domain_random else seed)
 
@@ -295,17 +304,17 @@ def evaluate(cfg: DictConfig,
     # collect trajectories
 
     num_trajs = cfg.num_trajs
-    len_buff, env_ret_buff = [], []
+    len_buff, ret_buff = [], []
 
     for i in range(num_trajs):
 
         logger.info(f"evaluating [{i + 1}/{num_trajs}]")
         traj = next(ep_gen)
-        ep_len, ep_env_ret = traj["ep_len"], traj["ep_env_ret"]
+        ep_len, ep_ret = traj["ep_len"], traj["ep_ret"]
 
         # aggregate to the history data structures
         len_buff.append(ep_len)
-        env_ret_buff.append(ep_env_ret)
+        ret_buff.append(ep_ret)
 
         if cfg.gather:
             # gather episode in file
@@ -316,7 +325,7 @@ def evaluate(cfg: DictConfig,
             frame_collection = env.render()  # ref: https://younis.dev/blog/render-api/
             record_video(vid_dir, str(i), np.array(frame_collection))
 
-    eval_metrics = {"ep_len": len_buff, "ep_env_ret": env_ret_buff}
+    eval_metrics = {"ep_len": len_buff, "ep_ret": ret_buff}
 
     # log stats in csv
     logger.record_tabular("timestep", agent.timesteps_so_far)
@@ -444,7 +453,7 @@ def learn(cfg: DictConfig,
 
             logger.info(("eval").upper())
 
-            len_buff, env_ret_buff = [], []
+            len_buff, ret_buff = [], []
 
             for j in range(cfg.eval_steps_per_iter):
 
@@ -452,7 +461,7 @@ def learn(cfg: DictConfig,
                 ep = next(ep_gen)
 
                 len_buff.append(ep["ep_len"])
-                env_ret_buff.append(ep["ep_env_ret"])
+                ret_buff.append(ep["ep_ret"])
 
                 if cfg.record:
                     # record a video of the episode
@@ -461,7 +470,7 @@ def learn(cfg: DictConfig,
                     record_video(vid_dir, f"iter{i}-ep{j}", np.array(frame_collection))
 
             eval_metrics: dict[str, np.ndarray] = {
-                "ep_len": np.array(len_buff), "ep_env_ret": np.array(env_ret_buff)}
+                "ep_len": np.array(len_buff), "ep_ret": np.array(ret_buff)}
 
             # log stats in csv
             logger.record_tabular("timestep", agent.timesteps_so_far)
