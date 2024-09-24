@@ -112,7 +112,7 @@ def segment(env: Union[Env, VectorEnv],
 
         # interact with env
         new_ob, rew, terminated, truncated, info = env.step(ac)
-        rew = np.array([rew])  # for all to be np.arrays
+        rew = rearrange(rew, "b -> b 1")
 
         if num_env > 1:
             logger.debug(f"{terminated=} | {truncated=}")
@@ -169,7 +169,6 @@ def postproc_vtr(num_envs: int,
     # it starts becoming interesting if the post-processing is heavier though
     outs = []
     for i in range(num_envs):
-        print(len(vtr), vtr[0].shape)
         tr = [e[i] for e in vtr]
         if "final_observation" in info:
             if bool(info["_final_observation"][i]):
