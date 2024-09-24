@@ -194,7 +194,9 @@ def postproc_tr(tr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
 @beartype
 def episode(env: Env,
             agent: Agent,
-            seed: int):
+            seed: int,
+            *,
+            robustness_test: bool = False):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
@@ -205,10 +207,11 @@ def episode(env: Env,
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
 
     def randomize_seed() -> int:
-        return seed + rng.integers(100000, size=1).item()
+        logger.warn("performing robustness test")
+        return seed + rng.integers(2**32 - 1, size=1).item()
         # seeded Generator: deterministic -> reproducible
 
-    ob, _ = env.reset(seed=randomize_seed())
+    ob, _ = env.reset(seed=randomize_seed() if robustness_test else seed)
 
     cur_ep_len = 0
     cur_ep_env_ret = 0
@@ -254,7 +257,7 @@ def episode(env: Env,
             acs = []
             env_rews = []
 
-            ob, _ = env.reset(seed=randomize_seed())
+            ob, _ = env.reset(seed=randomize_seed() if robustness_test else seed)
 
 
 @beartype
@@ -377,7 +380,8 @@ def learn(cfg: DictConfig,
         env, cfg.num_env, agent, cfg.seed, cfg.segment_len, cfg.action_repeat)
     # create episode generator for evaluating the agent
     eval_seed = cfg.seed + 123456  # arbitrary choice
-    ep_gen = episode(eval_env, agent, eval_seed)
+    ep_gen = episode(
+        eval_env, agent, eval_seed, robustness_test=cfg.robustness_test)
 
     i = 0
 
