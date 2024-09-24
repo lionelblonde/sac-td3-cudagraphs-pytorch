@@ -28,18 +28,24 @@ DEBUG = False
 
 
 @beartype
-def save_dict_h5py(data: dict[str, np.ndarray], fname: Union[str, Path]):
-    """Save dictionary containing numpy arrays to h5py file."""
+def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
+    """Save dictionary containing numpy objects to h5py file."""
+    fname = save_dir / Path(f"{name.zfill(3)}.h5")
+    for k, v in data.items():
+        assert isinstance(v, (np.ndarray, np.floating, np.integer)), f"dict['{k}']: wrong type"
     with h5py.File(fname, "w") as hf:
         for key in data:
             hf.create_dataset(key, data=data[key])
+
+
+gather_rolls = save_dict_h5py  # alias
 
 
 @beartype
 def load_dict_h5py(fname: Union[str, Path],
     ) -> tuple[dict[str, np.ndarray],
                dict[str, Union[np.floating, np.integer]]]:
-    """Restore dictionary containing numpy arrays from h5py file."""
+    """Restore dictionary containing numpy objects from h5py file."""
     data, stts = {}, {}
     with h5py.File(fname, "r") as hf:
         for key in hf:
@@ -267,6 +273,10 @@ def evaluate(cfg: DictConfig,
 
     assert isinstance(cfg, DictConfig)
 
+    rol_dir = Path(cfg.rolls_dir) / name
+    if cfg.gather:
+        rol_dir.mkdir(parents=True, exist_ok=True)
+
     vid_dir = Path(cfg.video_dir) / name
     if cfg.record:
         vid_dir.mkdir(parents=True, exist_ok=True)
@@ -296,6 +306,10 @@ def evaluate(cfg: DictConfig,
         # aggregate to the history data structures
         len_buff.append(ep_len)
         env_ret_buff.append(ep_env_ret)
+
+        if cfg.gather:
+            # gather episode in file
+            gather_rolls(rol_dir, str(i), traj)
 
         if cfg.record:
             # record a video of the episode
