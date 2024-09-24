@@ -27,8 +27,6 @@ FARAMA_MUJOCO_STEM = [
     "Walker2d",
 ]
 FARAMA_MUJOCO = []
-FARAMA_MUJOCO.extend([f"{name}-v4"
-    for name in FARAMA_MUJOCO_STEM])
 FARAMA_MUJOCO.extend([f"{name}-v5"
     for name in FARAMA_MUJOCO_STEM])
 
@@ -54,8 +52,6 @@ DEEPMIND_MUJOCO_STEM = [
 ]
 DEEPMIND_MUJOCO = []
 DEEPMIND_MUJOCO.extend([f"{name}-Feat-v0"
-    for name in DEEPMIND_MUJOCO_STEM])
-DEEPMIND_MUJOCO.extend([f"{name}-Pix-v0"
     for name in DEEPMIND_MUJOCO_STEM])
 
 # Flag benchmarks that are not available yet
