@@ -133,7 +133,6 @@ def segment(env: Union[Env, VectorEnv],
 
         tr_or_vtr = [ob, ac, new_ob, rew, terminated]
         # note: we use terminated as a done replacement, but keep the key "dones1"
-        # because it is the key used in the demo files
 
         if num_env > 1:
             pp_func = partial(postproc_vtr, num_env, info)
@@ -347,8 +346,8 @@ def learn(cfg: DictConfig,
     logger.info(f"dry run. saving model @:\n{ckpt_dir}")
 
     # group by everything except the seed, which is last, hence index -1
-    # it groups by uuid + gitSHA + env_id + num_demos
-    group = ".".join(name.split(".")[:2])
+    # it groups by uuid + gitSHA + env_id
+    group = ".".join(name.split(".")[:-1])
     # set up wandb
     os.environ["WANDB__SERVICE_WAIT"] = "300"
     while True:
