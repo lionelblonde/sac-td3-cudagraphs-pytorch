@@ -260,7 +260,7 @@ class Agent(object):
             next_state = trns_batch["obs1"]
             reward = trns_batch["erews1"]
             done = trns_batch["dones1"].float()
-            td_len = trns_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
+            td_len = torch.ones_like(done)
             # update the observation normalizer
             self.rms_obs.update(state)
 
@@ -276,7 +276,6 @@ class Agent(object):
         # compute critic and actor losses
         actr_loss, crit_loss, twin_loss = self.compute_losses(
             state, action, next_state, next_action, reward, done, td_len)
-        # if `twin_loss` is None at this point, it means we are using C51 or QR
 
         if update_actr:
             # update actor
