@@ -25,6 +25,7 @@ from agents.agent import Agent
 
 
 DEBUG = False
+START_SAVING_BEST_MODEL_THRES = 200_000
 
 
 @beartype
@@ -464,11 +465,12 @@ def learn(cfg: DictConfig,
                 "ep_len-mean": np.mean(np.array(len_buff)),
                 "ep_ret-mean": np.mean(np.array(ret_buff))}
 
-            if (new_best := eval_metrics["ep_ret-mean"].item()) > agent.best_eval_ep_ret:
-                # save the new best model
-                agent.best_eval_ep_ret = new_best
-                agent.save_to_path(ckpt_dir, sfx="best")
-                logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
+            if agent.timesteps_so_far >= START_SAVING_BEST_MODEL_THRES:
+                if (new_best := eval_metrics["ep_ret-mean"].item()) > agent.best_eval_ep_ret:
+                    # save the new best model
+                    agent.best_eval_ep_ret = new_best
+                    agent.save_to_path(ckpt_dir, sfx="best")
+                    logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
 
             # log stats in csv
             logger.record_tabular("timestep", agent.timesteps_so_far)
