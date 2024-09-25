@@ -497,3 +497,5 @@ def learn(cfg: DictConfig,
     # save once we are done
     agent.save_to_path(ckpt_dir, sfx="done")
     logger.warn(f"we are done -- saved model @:\n{ckpt_dir}\nbye.")
+    # mark a run as finished, and finish uploading all data (from docs)
+    wandb.finish()
