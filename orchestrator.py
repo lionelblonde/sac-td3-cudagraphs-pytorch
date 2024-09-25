@@ -300,12 +300,11 @@ def evaluate(cfg: DictConfig,
 
     # collect trajectories
 
-    num_trajs = cfg.num_trajs
     len_buff, ret_buff = [], []
 
-    for i in range(num_trajs):
+    for i in range(cfg.num_trajs):
 
-        logger.info(f"evaluating [{i + 1}/{num_trajs}]")
+        logger.info(f"evaluating [{i + 1}/{cfg.num_trajs}]")
         traj = next(ep_gen)
         ep_len, ep_ret = traj["ep_len"], traj["ep_ret"]
 
