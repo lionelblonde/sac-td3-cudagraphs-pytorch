@@ -70,12 +70,12 @@ class Critic(nn.Module):
             ("fc_block_1", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.Mish()),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.Mish()),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], 1)
@@ -116,12 +116,12 @@ class Actor(nn.Module):
             ("fc_block_1", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(ob_dim, hid_dims[0])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.Mish()),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.Mish()),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], ac_dim)
