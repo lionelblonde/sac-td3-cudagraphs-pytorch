@@ -401,22 +401,55 @@ class Agent(object):
             logger.warn("there is a twin the loaded ckpt, but you want none")
 
     @beartype
+    @staticmethod
+    def compare_dictconfigs(
+        dictconfig1: DictConfig,
+        dictconfig2: DictConfig,
+    ) -> dict[str, dict[str, Union[str, int, list[int], dict[str, Union[str, int, list[int]]]]]]:
+        """Compare two DictConfig objects and return the differences.
+        Returns a dictionary with keys "added", "removed", and "changed".
+        """
+        differences = {"added": {}, "removed": {}, "changed": {}}
+
+        keys1 = set(dictconfig1.keys())
+        keys2 = set(dictconfig2.keys())
+
+        # added keys
+        for key in keys2 - keys1:
+            differences["added"][key] = dictconfig2[key]
+
+        # removed keys
+        for key in keys1 - keys2:
+            differences["removed"][key] = dictconfig1[key]
+
+        # changed keys
+        for key in keys1 & keys2:
+            if dictconfig1[key] != dictconfig2[key]:
+                differences["changed"][key] = {
+                    "from": dictconfig1[key], "to": dictconfig2[key]}
+
+        return differences
+
+    @beartype
     def load(self, wandb_run_path: str, model_name: str = "ckpt_best.pth"):
         """Download a model from wandb and load it"""
         api = wandb.Api()
         run = api.run(wandb_run_path)
-        # create a temporary directory
+        # compare the current cfg with the cfg of the loaded model
+        wandb_cfg_dict: dict[str, Any] = run.config
+        wandb_cfg: DictConfig = OmegaConf.create(wandb_cfg_dict)
+        a, r, c = self.compare_dictconfigs(wandb_cfg, self.hps).values()
+        # N.B.: in Python 3.7 and later, dicts preserve the insertion order
+        logger.warn(f"added  : {a}")
+        logger.warn(f"removed: {r}")
+        logger.warn(f"changed: {c}")
+        # create a temporary directory to download to
         with tempfile.TemporaryDirectory() as tmp_dir_name:
             file = run.file(model_name)
+            # download the model file from wandb servers
             file.download(root=tmp_dir_name, replace=True)
             logger.warn("model downloaded from wandb to disk")
             tmp_file_path = Path(tmp_dir_name) / model_name
             # load the agent stored in this file
             self.load_from_disk(tmp_file_path)
             logger.warn("model loaded")
-        # override cfg with the cfg of the loaded model
-        wandb_cfg_dict: dict[str, Any] = run.config
-        wandb_cfg: DictConfig = OmegaConf.create((wandb_cfg_dict))
-        # merge it with the original cfg, giving precedence to the wandb values
-        self.hps = OmegaConf.merge(self.hps, wandb_cfg)
-        logger.warn("cfg overridden by downloaded model cfg")
