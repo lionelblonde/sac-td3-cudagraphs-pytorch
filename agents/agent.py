@@ -1,10 +1,10 @@
 import tempfile
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from collections import defaultdict
 
 from beartype import beartype
-from omegaconf import DictConfig
+from omegaconf import OmegaConf, DictConfig
 from einops import pack
 import wandb
 import numpy as np
@@ -372,19 +372,7 @@ class Agent(object):
         if sfx == "best":
             # upload the model to wandb servers
             wandb.save(str(path), base_path=parent)
-
-    @beartype
-    def load(self, wandb_run_path: str, model_name: str = "ckpt_best.pth"):
-        """Download a model from wandb and load it"""
-        api = wandb.Api()
-        run = api.run(wandb_run_path)
-        # create a temporary directory
-        with tempfile.TemporaryDirectory() as tmp_dir_name:
-            file = run.file(model_name)
-            file.download(root=tmp_dir_name, replace=True)
-            tmp_file_path = Path(tmp_dir_name) / model_name
-            # load the agent stored in this file
-            self.load_from_disk(tmp_file_path)
+            logger.warn(f"{sfx} model saved to wandb")
 
     @beartype
     def load_from_disk(self, path: Path):
@@ -410,3 +398,21 @@ class Agent(object):
                 raise IOError("no twin found in checkpoint ckpt file")
         elif "twin" in checkpoint:  # in the case where clipped double is off
             logger.warn("there is a twin the loaded ckpt, but you want none")
+
+    @beartype
+    def load(self, wandb_run_path: str, model_name: str = "ckpt_best.pth"):
+        """Download a model from wandb and load it"""
+        api = wandb.Api()
+        run = api.run(wandb_run_path)
+        # create a temporary directory
+        with tempfile.TemporaryDirectory() as tmp_dir_name:
+            file = run.file(model_name)
+            file.download(root=tmp_dir_name, replace=True)
+            tmp_file_path = Path(tmp_dir_name) / model_name
+            # load the agent stored in this file
+            self.load_from_disk(tmp_file_path)
+        # override cfg with the cfg of the loaded model
+        wandb_cfg_dict: dict[str, Any] = run.config
+        wandb_cfg: DictConfig = OmegaConf.create((wandb_cfg_dict))
+        # merge it with the original cfg, giving precedence to the wandb values
+        self.hps = OmegaConf.merge(self.hps, wandb_cfg)
