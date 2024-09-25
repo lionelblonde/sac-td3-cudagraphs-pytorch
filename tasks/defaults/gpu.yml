@@ -8,7 +8,6 @@ multi_proc: true
 numenv: 4
 horizon: 1000
 action_repeat: 1
-domain_random: false
 
 # logging
 wandb_project: "calico"
@@ -17,19 +16,18 @@ render: false
 gather: false
 
 # training
-num_timesteps: 10000000
+num_timesteps: 1000000
 training_steps_per_iter: 1
-eval_steps_per_iter: 10
+eval_steps_per_iter: 100
 eval_every: 100
 
 # model
 layer_norm: true
 
 # optimization
-actor_lr: 2.5e-4
-critic_lr: 2.5e-4
+actr_lr: 2.5e-4
+crit_lr: 2.5e-4
 clip_norm: 40.
-wd_scale: 0.
 
 # algorithm
 segment_len: 1
@@ -38,14 +36,12 @@ gamma: 0.99
 rbx_capacity: 250000
 polyak: 0.005
 targ_up_freq: 100
-n_step_returns: false
-lookahead: 5
 ret_norm: false
 
 # TD3
 normal_noise_std: 0.1
 clipped_double: true
-bcq_style_targ_mix: true
+bcq_style_targ_mix: false
 targ_actor_smoothing: true
 td3_std: 0.2
 td3_c: 0.5
