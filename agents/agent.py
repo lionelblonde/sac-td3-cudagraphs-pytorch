@@ -1,4 +1,4 @@
-import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional, Union
 from collections import defaultdict
@@ -351,7 +351,7 @@ class Agent(object):
                  if sfx is not None
                  else f".ckpt_{self.timesteps_so_far}ts")
         # design choice: hide the ckpt saved without an extra qualifier
-        path = path / f"{fname}.pth"
+        path = (parent := path) / f"{fname}.pth"
         checkpoint = {
             "hps": self.hps,  # handy for archeology
             "timesteps_so_far": self.timesteps_so_far,
@@ -371,10 +371,23 @@ class Agent(object):
         torch.save(checkpoint, path)
         if sfx == "best":
             # upload the model to wandb servers
-            wandb.save(str(path))
+            wandb.save(str(path), base_path=parent)
 
     @beartype
-    def load(self, path: Path):
+    def load(self, wandb_run_path: str, model_name: str = "ckpt_best.pth"):
+        """Download a model from wandb and load it"""
+        api = wandb.Api()
+        run = api.run(wandb_run_path)
+        # create a temporary directory
+        with tempfile.TemporaryDirectory() as tmp_dir_name:
+            file = run.file(model_name)
+            file.download(root=tmp_dir_name, replace=True)
+            tmp_file_path = Path(tmp_dir_name) / model_name
+            # load the agent stored in this file
+            self.load_from_disk(tmp_file_path)
+
+    @beartype
+    def load_from_disk(self, path: Path):
         """Load another agent into this one"""
         checkpoint = torch.load(path)
         if "timesteps_so_far" in checkpoint:
