@@ -95,13 +95,13 @@ def segment(env: Union[Env, VectorEnv],
     assert isinstance(env.action_space, gym.spaces.Box)  # to ensure `high` and `low` exist
     ac_low, ac_high = env.action_space.low, env.action_space.high
 
+    ob, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
+    ac = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
+
     t = 0
     r = 0  # action repeat reference
 
     assert agent.replay_buffers is not None
-
-    ob, _ = env.reset(seed=seed)  # seed is a keyword argument, not positional
-    ac = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
 
     while True:
 
@@ -160,7 +160,7 @@ def segment(env: Union[Env, VectorEnv],
         if num_env == 1:
             assert isinstance(env, Env)
             if done:
-                ob, _ = env.reset(seed=seed)
+                ob, _ = env.reset()
 
         t += 1
         r += 1
@@ -200,9 +200,7 @@ def postproc_tr(tr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
 @beartype
 def episode(env: Env,
             agent: Agent,
-            seed: int,
-            *,
-            domain_random: bool = False):
+            seed: int):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
@@ -213,11 +211,10 @@ def episode(env: Env,
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
 
     def randomize_seed() -> int:
-        logger.warn("randomizing seed")
         return seed + rng.integers(2**32 - 1, size=1).item()
         # seeded Generator: deterministic -> reproducible
 
-    ob, _ = env.reset(seed=randomize_seed() if domain_random else seed)
+    ob, _ = env.reset(seed=randomize_seed())
 
     cur_ep_len = 0
     cur_ep_ret = 0
@@ -271,7 +268,7 @@ def episode(env: Env,
             erews1 = []
             dones1 = []
 
-            ob, _ = env.reset(seed=randomize_seed() if domain_random else seed)
+            ob, _ = env.reset(seed=randomize_seed())
 
 
 @beartype
