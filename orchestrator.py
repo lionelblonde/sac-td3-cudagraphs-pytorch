@@ -295,7 +295,7 @@ def evaluate(cfg: DictConfig,
 
     # load the model
     model_path = cfg.model_path
-    agent.load_from_path(model_path)
+    agent.load(model_path)
     logger.info(f"model loaded from path:\n {model_path}")
 
     # collect trajectories
@@ -361,7 +361,7 @@ def learn(cfg: DictConfig,
         vid_dir.mkdir(parents=True, exist_ok=True)
 
     # save the model as a dry run, to avoid bad surprises at the end
-    agent.save_to_path(ckpt_dir, sfx="dryrun")
+    agent.save(ckpt_dir, sfx="dryrun")
     logger.warn(f"dry run -- saved model @:\n{ckpt_dir}")
 
     # group by everything except the seed, which is last, hence index -1
@@ -467,7 +467,7 @@ def learn(cfg: DictConfig,
             if (new_best := eval_metrics["ep_ret-mean"].item()) > agent.best_eval_ep_ret:
                 # save the new best model
                 agent.best_eval_ep_ret = new_best
-                agent.save_to_path(ckpt_dir, sfx="best")
+                agent.save(ckpt_dir, sfx="best")
                 logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
 
             # log stats in csv
@@ -480,7 +480,7 @@ def learn(cfg: DictConfig,
             # log stats in dashboard
             assert agent.replay_buffers is not None
             wandb_dict = {
-                **{f"{k}-mean": v.mean() for k, v in eval_metrics.items()},
+                **eval_metrics,
                 "rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
                 # taking the first because this one will always exist whatever the numenv
                 "avg-tt-per-iter": avg_tt_per_iter}
@@ -493,7 +493,7 @@ def learn(cfg: DictConfig,
         logger.info()
 
     # save once we are done
-    agent.save_to_path(ckpt_dir, sfx="done")
+    agent.save(ckpt_dir, sfx="done")
     logger.warn(f"we are done -- saved model @:\n{ckpt_dir}\nbye.")
     # mark a run as finished, and finish uploading all data (from docs)
     wandb.finish()

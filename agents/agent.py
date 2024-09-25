@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from typing import Optional, Union
 from collections import defaultdict
@@ -343,8 +344,8 @@ class Agent(object):
                     targ_param.copy_(new_param)
 
     @beartype
-    def save_to_path(self, path: Path, sfx: Optional[str] = None):
-        """Save the agent to disk"""
+    def save(self, path: Path, sfx: Optional[str] = None):
+        """Save the agent to disk and wandb servers"""
         # prep checkpoint
         fname = (f"ckpt_{sfx}"
                  if sfx is not None
@@ -368,10 +369,13 @@ class Agent(object):
             })
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
+        if sfx == "best":
+            # upload the model to wandb servers
+            wandb.save(str(path))
 
     @beartype
-    def load_from_path(self, path: Path):
-        """Load an agent from disk into this one"""
+    def load(self, path: Path):
+        """Load another agent into this one"""
         checkpoint = torch.load(path)
         if "timesteps_so_far" in checkpoint:
             self.timesteps_so_far = checkpoint["timesteps_so_far"]
