@@ -93,7 +93,7 @@ class MagicRunner(object):
         assert "uuid" not in self._cfg  # uuid should never be in the cfg file
         self._cfg.uuid = uuid if uuid is not None else make_uuid()
 
-        assert "load_ckpt" not in self._cfg  # load_ckpt should never be in the cfg file
+        assert "load_ckpt" not in self._cfg, "load_ckpt must never be in the cfg file"
         if load_ckpt is not None:
             self._cfg.load_ckpt = load_ckpt  # add in cfg
         else:
@@ -106,6 +106,22 @@ class MagicRunner(object):
 
         # set the cfg to read-only for safety
         OmegaConf.set_readonly(self._cfg, value=True)
+
+    @beartype
+    def setup_device(self) -> torch.device:
+        assert not self._cfg.fp16 or self._cfg.cuda, "fp16 => cuda"  # TODO(lionel): fp16 support
+        if self._cfg.cuda:
+            # use cuda
+            assert torch.cuda.is_available()
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+            device = torch.device("cuda:0")
+        else:
+            # default case: just use plain old cpu, no cuda or m-chip gpu
+            device = torch.device("cpu")
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""  # kill any possibility of usage
+        logger.info(f"device in use: {device}")
+        return device
 
     @beartype
     def train(self):
@@ -129,18 +145,7 @@ class MagicRunner(object):
             OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
         # device
-        assert not self._cfg.fp16 or self._cfg.cuda, "fp16 => cuda"  # TODO(lionel): fp16 not done
-        if self._cfg.cuda:
-            # use cuda
-            assert torch.cuda.is_available()
-            torch.backends.cudnn.benchmark = False
-            torch.backends.cudnn.deterministic = True
-            device = torch.device("cuda:0")
-        else:
-            # default case: just use plain old cpu, no cuda or m-chip gpu
-            device = torch.device("cpu")
-            os.environ["CUDA_VISIBLE_DEVICES"] = ""  # kill any possibility of usage
-        logger.info(f"device in use: {device}")
+        device = self.setup_device()
 
         # seed
         torch.manual_seed(self._cfg.seed)
@@ -220,7 +225,7 @@ class MagicRunner(object):
     def evaluate(self):
 
         # mlsys
-        torch.set_num_threads(1)  # TODO(lionel): keep an eye on this
+        torch.set_num_threads(1)
 
         # set printing options
         np.set_printoptions(precision=3)
@@ -233,8 +238,7 @@ class MagicRunner(object):
             logger.set_level(self.LOGGER_LEVEL)
 
         # device
-        device = torch.device("cpu")
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""  # kill any possibility of usage
+        device = self.setup_device()
 
         # seed
         torch.manual_seed(self._cfg.seed)
