@@ -85,10 +85,6 @@ class Agent(object):
         # create observation normalizer that maintains running statistics
         self.rms_obs = RunningMoments(shape=self.ob_shape, device=self.device)
 
-        if self.hps.ret_norm:
-            # create return normalizer that maintains running statistics
-            self.rms_ret = RunningMoments(shape=(1,), device=self.device)
-
         # create online and target nets
 
         actr_hid_dims = (400, 300)
@@ -127,20 +123,6 @@ class Agent(object):
         log_module_info(self.crit)
         if self.hps.clipped_double:
             log_module_info(self.twin)
-
-    @beartype
-    def norm_rets(self, x: torch.Tensor) -> torch.Tensor:
-        """Standardize if return normalization is used, do nothing otherwise"""
-        if self.hps.ret_norm:
-            return self.rms_ret.standardize(x)
-        return x
-
-    @beartype
-    def denorm_rets(self, x: torch.Tensor) -> torch.Tensor:
-        """Standardize if return denormalization is used, do nothing otherwise"""
-        if self.hps.ret_norm:
-            return self.rms_ret.destandardize(x)
-        return x
 
     @beartype
     def sample_trns_batch(self) -> dict[str, torch.Tensor]:
@@ -190,8 +172,8 @@ class Agent(object):
         """Compute the critic and actor losses"""
 
         # compute qz estimates
-        q = self.denorm_rets(self.crit(state, action))
-        twin_q = self.denorm_rets(self.twin(state, action))
+        q = self.crit(state, action)
+        twin_q = self.twin(state, action)
 
         # compute target qz estimate and same for twin
         q_prime = self.targ_crit(next_state, next_action)
@@ -204,17 +186,10 @@ class Agent(object):
             # use TD3 style of target mixing: hard minimum
             q_prime = torch.min(q_prime, twin_q_prime)
 
-        q_prime = self.denorm_rets(q_prime)
-
         # assemble the Bellman target
         targ_q = (reward + (self.hps.gamma ** td_len) * (1. - done) * q_prime)
 
         targ_q = targ_q.detach()
-
-        targ_q = self.norm_rets(targ_q)
-        if self.hps.ret_norm:
-            # update the running stats
-            self.rms_ret.update(targ_q)
 
         # critic and twin losses
         crit_loss = ff.smooth_l1_loss(q, targ_q)  # Huber loss for both here and below

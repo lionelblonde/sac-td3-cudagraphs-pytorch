@@ -25,6 +25,7 @@ gather: false
 record: false
 
 # model
+batch_norm: true
 layer_norm: true
 
 # optimization
@@ -39,7 +40,6 @@ gamma: 0.99
 rbx_capacity: 250000
 polyak: 0.005
 targ_up_freq: 100
-ret_norm: false
 
 # TD3
 normal_noise_std: 0.1
