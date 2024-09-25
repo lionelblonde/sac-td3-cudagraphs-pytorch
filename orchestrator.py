@@ -97,6 +97,7 @@ def segment(env: Union[Env, VectorEnv],
             agent: Agent,
             seed: int,
             segment_len: int,
+            ini_rando_steps: int,
             action_repeat: int):
 
     assert isinstance(env.action_space, gym.spaces.Box)  # to ensure `high` and `low` exist
@@ -114,11 +115,14 @@ def segment(env: Union[Env, VectorEnv],
 
         if r % action_repeat == 0:
             # predict action
-            assert isinstance(ob, np.ndarray)
-            ac = agent.predict(ob, apply_noise=True)
-            # nan-proof and clip
-            ac = np.nan_to_num(ac)
-            ac = np.clip(ac, ac_low, ac_high)
+            if agent.timesteps_so_far < ini_rando_steps:
+                ac = env.action_space.sample()
+            else:
+                assert isinstance(ob, np.ndarray)
+                ac = agent.predict(ob, apply_noise=True)
+                # nan-proof and clip
+                ac = np.nan_to_num(ac)
+                ac = np.clip(ac, ac_low, ac_high)
 
         if t > 0 and t % segment_len == 0:
             yield
@@ -342,7 +346,7 @@ def train(cfg: DictConfig,
 
     # create segment generator for training the agent
     roll_gen = segment(
-        env, cfg.num_env, agent, cfg.seed, cfg.segment_len, cfg.action_repeat)
+        env, cfg.num_env, agent, cfg.seed, cfg.segment_len, cfg.ini_rando_steps, cfg.action_repeat)
     # create episode generator for evaluating the agent
     eval_seed = cfg.seed + 123456  # arbitrary choice
     ep_gen = episode(eval_env, agent, eval_seed)

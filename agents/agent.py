@@ -147,7 +147,7 @@ class Agent(object):
         # create tensor from the state (`require_grad=False` by default)
         ob_tensor = torch.Tensor(ob).to(self.device)
 
-        # predict an action
+        # predict an action using the policy
         ac_tensor = self.actr.act(ob_tensor)
         # if desired, add noise to the predicted action
         if apply_noise:

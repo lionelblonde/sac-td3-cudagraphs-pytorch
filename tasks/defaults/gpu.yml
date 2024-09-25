@@ -7,7 +7,8 @@ vectorized: true
 multi_proc: true
 numenv: 4
 horizon: 1000
-action_repeat: 2
+action_repeat: 1
+ini_rando_steps: 25000
 
 # logging
 wandb_project: "calico"
@@ -29,15 +30,15 @@ batch_norm: true
 layer_norm: true
 
 # optimization
-actr_lr: 1e-4
-crit_lr: 1e-4
+actr_lr: 3e-4
+crit_lr: 3e-4
 clip_norm: 0.
 
 # algorithm
 segment_len: 1
 batch_size: 64
 gamma: 0.99
-rbx_capacity: 400000
+rbx_capacity: 1000000
 polyak: 0.005
 
 # TD3
