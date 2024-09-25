@@ -82,8 +82,10 @@ class Agent(object):
         )  # spherical/isotropic additive Normal(0., 0.1) action noise (we set the std via cfg)
         logger.debug(f"{self.ac_noise} configured")
 
-        # create observation normalizer that maintains running statistics
-        self.rms_obs = RunningMoments(shape=self.ob_shape, device=self.device)
+        self.rms_obs = None
+        if self.hps.batch_norm:
+            # create observation normalizer that maintains running statistics
+            self.rms_obs = RunningMoments(shape=self.ob_shape, device=self.device)
 
         # create online and target nets
 
@@ -237,8 +239,10 @@ class Agent(object):
             reward = trns_batch["erews1"]
             done = trns_batch["dones1"].float()
             td_len = torch.ones_like(done)
-            # update the observation normalizer
-            self.rms_obs.update(state)
+            if self.hps.batch_norm:
+                assert self.rms_obs is not None
+                # update the observation normalizer
+                self.rms_obs.update(state)
 
         # compute target action
         if self.hps.targ_actor_smoothing:
@@ -331,17 +335,19 @@ class Agent(object):
             "hps": self.hps,  # handy for archeology
             "timesteps_so_far": self.timesteps_so_far,
             # and now the state_dict objects
-            "rms_obs": self.rms_obs.state_dict(),
             "actr": self.actr.state_dict(),
             "crit": self.crit.state_dict(),
             "actr_opt": self.actr_opt.state_dict(),
             "crit_opt": self.crit_opt.state_dict(),
         }
+        if self.hps.batch_norm:
+            assert self.rms_obs is not None
+            checkpoint.update({
+                "rms_obs": self.rms_obs.state_dict()})
         if self.hps.clipped_double:
             checkpoint.update({
                 "twin": self.twin.state_dict(),
-                "twin_opt": self.twin_opt.state_dict(),
-            })
+                "twin_opt": self.twin_opt.state_dict()})
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
         logger.warn(f"{sfx} model saved to disk")
@@ -357,7 +363,9 @@ class Agent(object):
         if "timesteps_so_far" in checkpoint:
             self.timesteps_so_far = checkpoint["timesteps_so_far"]
         # the "strict" argument of `load_state_dict` is True by default
-        self.rms_obs.load_state_dict(checkpoint["rms_obs"])
+        if self.hps.batch_norm:
+            assert self.rms_obs is not None
+            self.rms_obs.load_state_dict(checkpoint["rms_obs"])
         self.actr.load_state_dict(checkpoint["actr"])
         self.crit.load_state_dict(checkpoint["crit"])
         self.actr_opt.load_state_dict(checkpoint["actr_opt"])

@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Callable
+from typing import Callable, Optional
 
 from beartype import beartype
 from einops import pack
@@ -56,7 +56,7 @@ class Critic(nn.Module):
                  ob_shape: tuple[int, ...],
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
-                 rms_obs: RunningMoments,
+                 rms_obs: Optional[RunningMoments],
                  *,
                  layer_norm: bool):
         super().__init__()
@@ -86,7 +86,8 @@ class Critic(nn.Module):
 
     @beartype
     def forward(self, ob: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
-        ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
+        if self.rms_obs is not None:
+            ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x, _ = pack([ob, ac], "b *")
         x = self.fc_stack(x)
         return self.head(x)
@@ -99,7 +100,7 @@ class Actor(nn.Module):
                  ob_shape: tuple[int, ...],
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
-                 rms_obs: RunningMoments,
+                 rms_obs: Optional[RunningMoments],
                  max_ac: float,
                  *,
                  layer_norm: bool):
@@ -131,6 +132,7 @@ class Actor(nn.Module):
 
     @beartype
     def act(self, ob: torch.Tensor) -> torch.Tensor:
-        ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
+        if self.rms_obs is not None:
+            ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)
         return float(self.max_ac) * torch.tanh(self.head(x))
