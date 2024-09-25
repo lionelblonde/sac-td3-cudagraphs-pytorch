@@ -27,7 +27,7 @@ record: false
 
 # model
 batch_norm: true
-layer_norm: true
+layer_norm: false
 
 # optimization
 actr_lr: 3e-4
