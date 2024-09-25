@@ -272,67 +272,7 @@ def episode(env: Env,
 
 
 @beartype
-def evaluate(cfg: DictConfig,
-             env: Env,
-             agent_wrapper: Callable[[], Agent],
-             name: str):
-
-    assert isinstance(cfg, DictConfig)
-
-    rol_dir = Path(cfg.roll_dir) / name
-    if cfg.gather:
-        rol_dir.mkdir(parents=True, exist_ok=True)
-
-    vid_dir = Path(cfg.video_dir) / name
-    if cfg.record:
-        vid_dir.mkdir(parents=True, exist_ok=True)
-
-    # create an agent
-    agent = agent_wrapper()
-
-    # create episode generator
-    ep_gen = episode(env, agent, cfg.seed)
-
-    # load the model
-    model_path = cfg.model_path
-    agent.load(model_path)
-    logger.info(f"model loaded from path:\n {model_path}")
-
-    # collect trajectories
-
-    len_buff, ret_buff = [], []
-
-    for i in range(cfg.num_trajs):
-
-        logger.info(f"evaluating [{i + 1}/{cfg.num_trajs}]")
-        traj = next(ep_gen)
-        ep_len, ep_ret = traj["ep_len"], traj["ep_ret"]
-
-        # aggregate to the history data structures
-        len_buff.append(ep_len)
-        ret_buff.append(ep_ret)
-
-        if cfg.gather:
-            # gather episode in file
-            gather_roll(rol_dir, str(i), traj)
-
-        if cfg.record:
-            # record a video of the episode
-            frame_collection = env.render()  # ref: https://younis.dev/blog/render-api/
-            record_video(vid_dir, str(i), np.array(frame_collection))
-
-    eval_metrics = {"ep_len": len_buff, "ep_ret": ret_buff}
-
-    # log stats in csv
-    logger.record_tabular("timestep", agent.timesteps_so_far)
-    for k, v in eval_metrics.items():
-        logger.record_tabular(f"{k}-mean", np.mean(v))
-    logger.info("dumping stats in .csv file")
-    logger.dump_tabular()
-
-
-@beartype
-def learn(cfg: DictConfig,
+def train(cfg: DictConfig,
           env: Union[Env, VectorEnv],
           eval_env: Env,
           agent_wrapper: Callable[[], Agent],
