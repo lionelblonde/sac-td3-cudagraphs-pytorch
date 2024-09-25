@@ -119,20 +119,10 @@ class Agent(object):
 
         # set up the optimizers
 
-        self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actor_lr)
-        self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.critic_lr,
-            weight_decay=self.hps.wd_scale)
+        self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actr_lr)
+        self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.crit_lr)
         if self.hps.clipped_double:
-            self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.critic_lr,
-                weight_decay=self.hps.wd_scale)
-
-        # set up lr scheduler for the policy
-        self.actr_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.actr_opt,
-            (t_max := ((self.MAGIC_FACTOR * self.hps.num_timesteps * self.hps.actor_update_delay) /
-                       (self.hps.training_steps_per_iter))),
-        )
-        logger.info(f"{t_max = }")
+            self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
 
         # log module architectures
         log_module_info(self.actr)
@@ -301,14 +291,8 @@ class Agent(object):
 
             self.actr_updates_so_far += 1
 
-            # update lr
-            self.actr_sched.step()
-
             if self.actr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-                wandb_dict = {
-                    "actr_loss": actr_loss.numpy(force=True),
-                    "actr_lr": np.array(self.actr_sched.get_last_lr()[0]).astype(np.float64),
-                }
+                wandb_dict = {"actr_loss": actr_loss.numpy(force=True)}
                 self.send_to_dash(
                     wandb_dict,
                     step_metric=self.actr_updates_so_far,
@@ -375,7 +359,6 @@ class Agent(object):
             "crit": self.crit.state_dict(),
             "actr_opt": self.actr_opt.state_dict(),
             "crit_opt": self.crit_opt.state_dict(),
-            "actr_sched": self.actr_sched.state_dict(),
         }
         if self.hps.clipped_double:
             checkpoint.update({
@@ -397,7 +380,6 @@ class Agent(object):
         self.crit.load_state_dict(checkpoint["crit"])
         self.actr_opt.load_state_dict(checkpoint["actr_opt"])
         self.crit_opt.load_state_dict(checkpoint["crit_opt"])
-        self.actr_sched.load_state_dict(checkpoint["actr_sched"])
         if self.hps.clipped_double:
             if "twin" in checkpoint:
                 self.twin.load_state_dict(checkpoint["twin"])
