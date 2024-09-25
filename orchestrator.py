@@ -400,8 +400,7 @@ def learn(cfg: DictConfig,
         env, cfg.num_env, agent, cfg.seed, cfg.segment_len, cfg.action_repeat)
     # create episode generator for evaluating the agent
     eval_seed = cfg.seed + 123456  # arbitrary choice
-    ep_gen = episode(
-        eval_env, agent, eval_seed, domain_random=cfg.domain_random)
+    ep_gen = episode(eval_env, agent, eval_seed)
 
     i = 0
 
