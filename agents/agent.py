@@ -41,7 +41,6 @@ class NormalActionNoise(object):
 
 class Agent(object):
 
-    MAGIC_FACTOR: float = 0.1
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
 
     @beartype
