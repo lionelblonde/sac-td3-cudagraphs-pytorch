@@ -100,8 +100,7 @@ class Agent(object):
         self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
 
         crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
-        crit_net_kwargs_keys = ["layer_norm"]
-        crit_net_kwargs = {k: getattr(self.hps, k) for k in crit_net_kwargs_keys}
+        crit_net_kwargs = {"layer_norm": self.hps.layer_norm}
         self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
         self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
 
