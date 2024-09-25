@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from beartype import beartype
 from omegaconf import DictConfig
-from einops import rearrange, pack
+from einops import pack
 import wandb
 import numpy as np
 import torch
