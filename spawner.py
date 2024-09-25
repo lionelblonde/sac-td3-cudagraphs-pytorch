@@ -35,6 +35,15 @@ ENV_BUNDLES = {
         "Swimmer-v4",
         "Walker2d-v4",
     ],
+    "priority": [
+        "Ant-v4",
+        "HalfCheetah-v4",
+        "Hopper-v4",
+        "HumanoidStandup-v4",
+        "Humanoid-v4",
+        "InvertedDoublePendulum-v4",
+        "Walker2d-v4",
+    ],
 }
 
 MEMORY = 32
