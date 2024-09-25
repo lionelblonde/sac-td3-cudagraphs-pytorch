@@ -11,15 +11,18 @@ action_repeat: 1
 
 # logging
 wandb_project: "calico"
-record: false
-render: false
-gather: false
 
-# training
+# training mode
 num_timesteps: 1000000
 training_steps_per_iter: 1
 eval_steps_per_iter: 100
 eval_every: 100
+
+# evaluation mode
+num_episodes: 10
+render: false
+gather: false
+record: false
 
 # model
 layer_norm: true
