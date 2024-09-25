@@ -311,6 +311,11 @@ class Agent(object):
             wandb_dict = {"crit_loss": crit_loss.numpy(force=True)}
             if twin_loss is not None:
                 wandb_dict.update({"twin_loss": twin_loss.numpy(force=True)})
+            self.send_to_dash(
+                wandb_dict,
+                step_metric=self.crit_updates_so_far,
+                glob="train_crit",
+            )
 
         # update target nets
         self.update_target_net()
