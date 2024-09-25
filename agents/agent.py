@@ -369,10 +369,11 @@ class Agent(object):
             })
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
+        logger.warn(f"{sfx} model saved to disk")
         if sfx == "best":
             # upload the model to wandb servers
             wandb.save(str(path), base_path=parent)
-            logger.warn(f"{sfx} model saved to wandb")
+            logger.warn("model saved to wandb")
 
     @beartype
     def load_from_disk(self, path: Path):
@@ -408,11 +409,14 @@ class Agent(object):
         with tempfile.TemporaryDirectory() as tmp_dir_name:
             file = run.file(model_name)
             file.download(root=tmp_dir_name, replace=True)
+            logger.warn("model downloaded from wandb to disk")
             tmp_file_path = Path(tmp_dir_name) / model_name
             # load the agent stored in this file
             self.load_from_disk(tmp_file_path)
+            logger.warn("model loaded")
         # override cfg with the cfg of the loaded model
         wandb_cfg_dict: dict[str, Any] = run.config
         wandb_cfg: DictConfig = OmegaConf.create((wandb_cfg_dict))
         # merge it with the original cfg, giving precedence to the wandb values
         self.hps = OmegaConf.merge(self.hps, wandb_cfg)
+        logger.warn("cfg overridden by downloaded model cfg")
