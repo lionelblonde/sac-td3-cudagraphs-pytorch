@@ -208,7 +208,7 @@ class MagicRunner(object):
         assert isinstance(eval_env, Env), "no vecenv allowed here"
 
         # train
-        orchestrator.learn(
+        orchestrator.train(
             cfg=self._cfg,
             env=env,
             eval_env=eval_env,
