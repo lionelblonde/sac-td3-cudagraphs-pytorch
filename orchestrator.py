@@ -457,7 +457,7 @@ def learn(cfg: DictConfig,
 
             len_buff, ret_buff = [], []
 
-            for j in range(cfg.eval_steps_per_iter):
+            for _ in range(cfg.eval_steps_per_iter):
 
                 # sample an episode
                 ep = next(ep_gen)
@@ -465,25 +465,20 @@ def learn(cfg: DictConfig,
                 len_buff.append(ep["ep_len"])
                 ret_buff.append(ep["ep_ret"])
 
-                if (new_best := ep["ep_ret"]) > agent.best_eval_ep_ret:
-                    # save the new best model
-                    agent.best_eval_ep_ret = new_best
-                    agent.save_to_path(ckpt_dir, sfx="best")
-                    logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
+            eval_metrics: dict[str, np.floating] = {  # type-checker
+                "ep_len-mean": np.mean(np.array(len_buff)),
+                "ep_ret-mean": np.mean(np.array(ret_buff))}
 
-                if cfg.record:
-                    # record a video of the episode
-                    # ref: https://younis.dev/blog/render-api/
-                    frame_collection = eval_env.render()
-                    record_video(vid_dir, f"iter{i}-ep{j}", np.array(frame_collection))
-
-            eval_metrics: dict[str, np.ndarray] = {
-                "ep_len": np.array(len_buff), "ep_ret": np.array(ret_buff)}
+            if (new_best := eval_metrics["ep_ret-mean"].item()) > agent.best_eval_ep_ret:
+                # save the new best model
+                agent.best_eval_ep_ret = new_best
+                agent.save_to_path(ckpt_dir, sfx="best")
+                logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
 
             # log stats in csv
             logger.record_tabular("timestep", agent.timesteps_so_far)
-            for k, v in eval_metrics.items():
-                logger.record_tabular(f"{k}-mean", v.mean())
+            for kv in eval_metrics.items():
+                logger.record_tabular(*kv)
             logger.info("dumping stats in .csv file")
             logger.dump_tabular()
 
