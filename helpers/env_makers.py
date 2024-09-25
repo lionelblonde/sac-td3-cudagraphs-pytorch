@@ -27,7 +27,7 @@ FARAMA_MUJOCO_STEM = [
     "Walker2d",
 ]
 FARAMA_MUJOCO = []
-FARAMA_MUJOCO.extend([f"{name}-v5"
+FARAMA_MUJOCO.extend([f"{name}-v4"
     for name in FARAMA_MUJOCO_STEM])
 
 # DeepMind Control Suite (DMC) MuJoCo
