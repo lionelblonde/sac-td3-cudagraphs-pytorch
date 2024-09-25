@@ -36,6 +36,13 @@ def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
     with h5py.File(fname, "w") as hf:
         for key in data:
             hf.create_dataset(key, data=data[key])
+    logger.warn(f"episode gathered on filesystem @:\n{fname}")
+    # before leaving, sanity check whether saving was a success
+    data, stts = load_dict_h5py(fname)
+    for k, v in (data | stts).items():  # Python 3.9 introduced "|" op for merging dicts
+        logger.warn(k, type(v))
+    del data
+    del stts
 
 
 gather_roll = save_dict_h5py  # alias
@@ -216,8 +223,8 @@ def episode(env: Env,
 
     ob, _ = env.reset(seed=randomize_seed())
 
-    cur_ep_len = 0
-    cur_ep_ret = 0
+    ep_len = 0
+    ep_ret = 0
     obs0 = []
     acs0 = []
     obs1 = []
@@ -238,12 +245,14 @@ def episode(env: Env,
         done = terminated or truncated
         dones1.append(done)
         erews1.append(erew)
-        cur_ep_len += 1
+        ep_len += 1
         assert isinstance(erew, float)  # quiets the type-checker
-        cur_ep_ret += erew
+        ep_ret += erew
         ob = deepcopy(new_ob)
 
         if done:
+            ep_len = np.int64(ep_len)  # applying the conversion: int -> np.int64
+            ep_ret = np.float64(ep_ret)  # already is a np.float64, but wrapping anyway
             obs0 = np.array(obs0)
             acs0 = np.array(acs0)
             obs1 = np.array(obs1)
@@ -255,13 +264,13 @@ def episode(env: Env,
                 "obs1": obs1,
                 "erews1": erews1,
                 "dones1": dones1,
-                "ep_len": cur_ep_len,
-                "ep_ret": cur_ep_ret,
+                "ep_len": ep_len,
+                "ep_ret": ep_ret,
             }
             yield out
 
-            cur_ep_len = 0
-            cur_ep_ret = 0
+            ep_len = 0
+            ep_ret = 0
             obs0 = []
             acs0 = []
             obs1 = []
@@ -295,10 +304,6 @@ def train(cfg: DictConfig,
     # set up model save directory
     ckpt_dir = Path(cfg.checkpoint_dir) / name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-    vid_dir = Path(cfg.video_dir) / name
-    if cfg.record:
-        vid_dir.mkdir(parents=True, exist_ok=True)
 
     # save the model as a dry run, to avoid bad surprises at the end
     agent.save(ckpt_dir, sfx="dryrun")
@@ -437,3 +442,61 @@ def train(cfg: DictConfig,
     logger.warn(f"we are done -- saved model @:\n{ckpt_dir}\nbye.")
     # mark a run as finished, and finish uploading all data (from docs)
     wandb.finish()
+
+
+@beartype
+def evaluate(cfg: DictConfig,
+             env: Env,
+             agent_wrapper: Callable[[], Agent],
+             name: str):
+
+    assert isinstance(cfg, DictConfig)
+
+    rol_dir = Path(cfg.roll_dir) / name
+    if cfg.gather:
+        rol_dir.mkdir(parents=True, exist_ok=True)
+
+    vid_dir = Path(cfg.video_dir) / name
+    if cfg.record:
+        vid_dir.mkdir(parents=True, exist_ok=True)
+
+    # create an agent
+    agent = agent_wrapper()
+
+    # create episode generator
+    ep_gen = episode(env, agent, cfg.seed)
+
+    # load the model
+    agent.load(cfg.load_ckpt)
+
+    # collect trajectories
+
+    len_buff, ret_buff = [], []
+
+    for i in range(n := cfg.num_episodes):
+
+        logger.warn(f"EVAL [{str(i + 1).zfill(3)}/{str(n).zfill(3)}]")
+        traj = next(ep_gen)
+        ep_len, ep_ret = traj["ep_len"], traj["ep_ret"]
+
+        # aggregate to the history data structures
+        len_buff.append(ep_len)
+        ret_buff.append(ep_ret)
+
+        if cfg.gather:
+            # gather episode in file
+            gather_roll(rol_dir, str(i), traj)
+
+        if cfg.record:
+            # record a video of the episode
+            frame_collection = env.render()  # ref: https://younis.dev/blog/render-api/
+            record_video(vid_dir, str(i), np.array(frame_collection))
+
+    eval_metrics = {"ep_len": len_buff, "ep_ret": ret_buff}
+
+    # log stats in csv
+    logger.record_tabular("timestep", agent.timesteps_so_far)
+    for k, v in eval_metrics.items():
+        logger.record_tabular(f"{k}-mean", np.mean(v))
+    logger.info("dumping stats in .csv file")
+    logger.dump_tabular()
