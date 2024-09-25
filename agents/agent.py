@@ -205,26 +205,6 @@ class Agent(object):
         return actr_loss, crit_loss, twin_loss
 
     @beartype
-    @staticmethod
-    def send_to_dash(metrics: dict[str, Union[np.float64, np.int64, np.ndarray]],
-                     *,
-                     step_metric: int,
-                     glob: str):
-        """Send the metrics to the wandb dashboard"""
-
-        wandb_dict = {}
-        for k, v in metrics.items():
-            if isinstance(v, np.ndarray):
-                assert v.ndim == 0
-            assert hasattr(v, "item"), "in case of API changes"
-            wandb_dict[f"{glob}/{k}"] = v.item()
-
-        wandb_dict[f"{glob}/step"] = step_metric
-
-        wandb.log(wandb_dict)
-        logger.debug(f"logged this to wandb: {wandb_dict}")
-
-    @beartype
     def update_actr_crit(self,
                          trns_batch: dict[str, torch.Tensor],
                          *,
@@ -267,13 +247,10 @@ class Agent(object):
 
             self.actr_updates_so_far += 1
 
-            if self.actr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-                wandb_dict = {"actr_loss": actr_loss.numpy(force=True)}
-                self.send_to_dash(
-                    wandb_dict,
-                    step_metric=self.actr_updates_so_far,
-                    glob="train_actr",
-                )
+            if (nups := self.actr_updates_so_far) % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
+                wandb_dict = {"loss/actr_loss": actr_loss.numpy(force=True),
+                              "nups/actr_updates_so_far": nups}
+                wandb.log(wandb_dict, step=self.timesteps_so_far)
 
         # update critic
         self.crit_opt.zero_grad()
@@ -287,15 +264,12 @@ class Agent(object):
 
         self.crit_updates_so_far += 1
 
-        if self.crit_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-            wandb_dict = {"crit_loss": crit_loss.numpy(force=True)}
+        if (nups := self.crit_updates_so_far) % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
+            wandb_dict = {"loss/crit_loss": crit_loss.numpy(force=True),
+                          "nups/crit_updates_so_far": nups}
             if twin_loss is not None:
-                wandb_dict.update({"twin_loss": twin_loss.numpy(force=True)})
-            self.send_to_dash(
-                wandb_dict,
-                step_metric=self.crit_updates_so_far,
-                glob="train_crit",
-            )
+                wandb_dict.update({"loss/twin_loss": twin_loss.numpy(force=True)})
+            wandb.log(wandb_dict, step=self.timesteps_so_far)
 
         # update target nets
         self.update_target_net()

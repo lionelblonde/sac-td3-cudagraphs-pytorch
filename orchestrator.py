@@ -339,11 +339,6 @@ def train(cfg: DictConfig,
             time.sleep(pause)
     logger.info("wandb co established!")
 
-    for glob in ["train_actr", "train_crit", "eval"]:  # wandb categories
-        # define a custom x-axis
-        wandb.define_metric(f"{glob}/step")
-        wandb.define_metric(f"{glob}/*", step_metric=f"{glob}/step")
-
     # create segment generator for training the agent
     roll_gen = segment(
         env, cfg.num_env, agent, cfg.seed, cfg.segment_len, cfg.ini_rando_steps, cfg.action_repeat)
@@ -410,10 +405,10 @@ def train(cfg: DictConfig,
                 ret_buff.append(ep["ep_ret"])
 
             eval_metrics: dict[str, np.floating] = {  # type-checker
-                "ep_len-mean": np.mean(np.array(len_buff)),
-                "ep_ret-mean": np.mean(np.array(ret_buff))}
+                "length": np.mean(np.array(len_buff)),
+                "return": np.mean(np.array(ret_buff))}
 
-            if (new_best := eval_metrics["ep_ret-mean"].item()) > agent.best_eval_ep_ret:
+            if (new_best := eval_metrics["return"].item()) > agent.best_eval_ep_ret:
                 # save the new best model
                 agent.best_eval_ep_ret = new_best
                 agent.save(ckpt_dir, sfx="best")
@@ -429,15 +424,12 @@ def train(cfg: DictConfig,
             # log stats in dashboard
             assert agent.replay_buffers is not None
             wandb_dict = {
-                **eval_metrics,
-                "rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
+                **{f"eval/{k}": v for k, v in eval_metrics.items()},
+                "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
                 # taking the first because this one will always exist whatever the numenv
-                "avg-tt-per-iter": avg_tt_per_iter}
-            agent.send_to_dash(
-                wandb_dict,
-                step_metric=agent.timesteps_so_far,
-                glob="eval",
-            )
+                "vitals/avg-tt-per-iter": avg_tt_per_iter,
+            }
+            wandb.log(wandb_dict, step=agent.timesteps_so_far)
 
         logger.info()
 
