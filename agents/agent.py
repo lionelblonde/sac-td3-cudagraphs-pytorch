@@ -65,9 +65,8 @@ class Agent(object):
         self.actr_updates_so_far = 0
         self.crit_updates_so_far = 0
 
-        self.best_eval_ep_ret = -np.inf  # updated in orchastrator
+        self.best_eval_ep_ret = -np.inf  # updated in orchestrator
 
-        assert self.hps.lookahead > 1 or not self.hps.n_step_returns
         assert self.hps.segment_len <= self.hps.batch_size
         if self.hps.clip_norm <= 0:
             logger.info("clip_norm <= 0, hence disabled")
