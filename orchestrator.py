@@ -380,9 +380,11 @@ def train(cfg: DictConfig,
             # sample a batch of transitions and trajectories
             trns_batch = agent.sample_trns_batch()
             # determine if updating the actr
-            update_actr = not bool(agent.crit_updates_so_far % cfg.actor_update_delay)
+            update_actr = True
+            if cfg.actr_update_delay:
+                update_actr = bool(agent.crit_updates_so_far % 2)
+            # update the actor and critic
             with ctx("actor-critic training"):
-                # update the actor and critic
                 agent.update_actr_crit(trns_batch, update_actr=update_actr)
 
             ttl.append(timer() - tts)
