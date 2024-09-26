@@ -14,8 +14,8 @@ ini_rando_steps: 25000
 wandb_project: "calico"
 
 # training mode
-learning_starts: 10000
-num_timesteps: 1000000
+learning_starts: 5000
+num_timesteps: 3000000
 training_steps_per_iter: 1
 eval_steps_per_iter: 10
 eval_every: 100
@@ -28,23 +28,24 @@ record: false
 
 # model
 batch_norm: true
-layer_norm: true
+layer_norm: false
 
 # optimization
-actr_lr: 1e-3
-crit_lr: 1e-3
-clip_norm: 20.
+actr_lr: 1e-4
+crit_lr: 1e-4
+clip_norm: 0.
 
 # algorithm
 segment_len: 1
-batch_size: 512
+batch_size: 1024
 gamma: 0.99
 rbx_capacity: 1000000
-polyak: 0.01
+polyak: 0.005
 prefer_td3_over_sac: false
 bcq_style_targ_mix: false
-crit_targ_update_freq: 1
+actr_update_delay: false
+crit_targ_update_freq: 2
 alpha_init: 0.1
-learnable_alpha: false
-log_alpha_lr: 3e-4
+learnable_alpha: true
+log_alpha_lr: 1e-4
 state_dependent_std: true
