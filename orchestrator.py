@@ -25,6 +25,7 @@ from agents.agent import Agent
 
 
 DEBUG = False
+TIME_THRES_VITALS_LOGGING = 1_000
 
 
 @beartype
@@ -383,12 +384,18 @@ def train(cfg: DictConfig,
             ttl.append(timer() - tts)
             tts = timer()
 
-        logger.info(colored(
-            f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",  # logged in eval
-            "green", attrs=["reverse"]))
-        logger.info(colored(
-            f"tot tt over {tot}steps: {np.sum(ttl)}secs",
-            "magenta", attrs=["reverse"]))
+        avg_tt_per_iter, time_to_targ_ts = None, None
+        if i > TIME_THRES_VITALS_LOGGING:
+            logger.info(colored(
+                f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",
+                "green", attrs=["reverse"]))
+            logger.info(colored(
+                f"tot tt over {tot}steps: {np.sum(ttl)}secs",
+                "magenta", attrs=["reverse"]))
+
+            time_to_targ_ts = (
+                ((cfg.num_timesteps - agent.timesteps_so_far) / cfg.segment_len) * avg_tt_per_iter)
+            time_to_targ_ts /= 3600  # convert seconds to hours
 
         i += 1
 
@@ -429,8 +436,12 @@ def train(cfg: DictConfig,
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
                 "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
                 # taking the first because this one will always exist whatever the numenv
-                "vitals/avg-tt-per-iter": avg_tt_per_iter,
             }
+            if avg_tt_per_iter is not None and time_to_targ_ts is not None:
+                wandb_dict.update({
+                    "vitals/avg-tt-per-iter": avg_tt_per_iter,
+                    "vitals/time-to-targ-ts": time_to_targ_ts,
+                })
             wandb.log(wandb_dict, step=agent.timesteps_so_far)
 
         logger.info()
