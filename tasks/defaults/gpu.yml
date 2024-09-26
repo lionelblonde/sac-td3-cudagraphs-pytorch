@@ -5,7 +5,7 @@ fp16: false
 # env
 vectorized: true
 multi_proc: true
-numenv: 4
+numenv: 8
 horizon: 1000
 action_repeat: 1
 ini_rando_steps: 25000
@@ -32,11 +32,11 @@ layer_norm: true
 # optimization
 actr_lr: 3e-4
 crit_lr: 3e-4
-clip_norm: 0.
+clip_norm: 20.
 
 # algorithm
 segment_len: 1
-batch_size: 64
+batch_size: 512
 gamma: 0.99
 rbx_capacity: 1000000
 polyak: 0.005
