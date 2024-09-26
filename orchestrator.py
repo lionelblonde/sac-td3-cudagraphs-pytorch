@@ -384,7 +384,7 @@ def train(cfg: DictConfig,
             ttl.append(timer() - tts)
             tts = timer()
 
-        avg_tt_per_iter, time_to_targ_ts = None, None
+        avg_tt_per_iter, wc_tt_2_targ_ts = None, None
         if i > TIME_THRES_VITALS_LOGGING:
             logger.info(colored(
                 f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",
