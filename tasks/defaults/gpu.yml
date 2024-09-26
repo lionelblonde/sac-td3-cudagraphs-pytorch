@@ -30,8 +30,8 @@ batch_norm: true
 layer_norm: true
 
 # optimization
-actr_lr: 3e-4
-crit_lr: 3e-4
+actr_lr: 1e-3
+crit_lr: 1e-3
 clip_norm: 20.
 
 # algorithm
