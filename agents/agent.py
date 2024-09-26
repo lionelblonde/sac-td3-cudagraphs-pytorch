@@ -141,15 +141,16 @@ class Agent(object):
         if not self.hps.prefer_td3_over_sac:
             self.loga_sclr = GradScaler(enabled=self.hps.fp16)
 
-        # setup log(alpha) if SAC is chosen
-        self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
-        # the previous line is here for the alpha property to always exist
-        if (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha:
-            # create learnable Lagrangian multiplier
-            # common trick: learn log(alpha) instead of alpha directly
-            self.log_alpha.requires_grad = True
-            self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
-            self.loga_opt = Adam([self.log_alpha], lr=self.hps.log_alpha_lr)
+        if not self.hps.prefer_td3_over_sac:
+            # setup log(alpha) if SAC is chosen
+            self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
+
+            if self.hps.learnable_alpha:
+                # create learnable Lagrangian multiplier
+                # common trick: learn log(alpha) instead of alpha directly
+                self.log_alpha.requires_grad = True
+                self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
+                self.loga_opt = Adam([self.log_alpha], lr=self.hps.log_alpha_lr)
 
         # log module architectures
         log_module_info(self.actr)
@@ -157,8 +158,10 @@ class Agent(object):
         log_module_info(self.twin)
 
     @property
-    def alpha(self):
-        return self.log_alpha.exp()
+    def alpha(self) -> Optional[torch.Tensor]:
+        if not self.hps.prefer_td3_over_sac:
+            return self.log_alpha.exp()
+        return None
 
     @beartype
     def sample_trns_batch(self) -> dict[str, torch.Tensor]:
@@ -264,6 +267,7 @@ class Agent(object):
             q_prime = torch.min(q_prime, twin_q_prime)
 
         if not self.hps.prefer_td3_over_sac:  # only for SAC
+            assert self.alpha is not None
             # add the causal entropy regularization term
             next_log_prob = self.actr.logp(next_state, next_action, self.max_ac)
             q_prime -= self.alpha.detach() * next_log_prob
@@ -279,13 +283,15 @@ class Agent(object):
 
         # actor loss
         if self.hps.prefer_td3_over_sac:
-            actr_loss = -self.crit(state, action_from_actr).mean()
+            actr_loss = -self.crit(state, action_from_actr)
         else:
+            assert self.alpha is not None
             actr_loss = (self.alpha.detach() * log_prob) - torch.min(
                 self.crit(state, action_from_actr),
-                self.twin(state, action_from_actr)).mean()
+                self.twin(state, action_from_actr))
             if not actr_loss.mean().isfinite():
                 raise ValueError("NaNs: numerically unstable arctanh func")
+        actr_loss = actr_loss.mean()
 
         if (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha:
             assert log_prob is not None
@@ -361,6 +367,7 @@ class Agent(object):
                               "nups/actr_updates_so_far": nups}
                 if not self.hps.prefer_td3_over_sac:
                     # using SAC
+                    assert self.alpha is not None
                     wandb_dict.update({"vitals/alpha": self.alpha.numpy(force=True)})
                     if loga_loss is not None:
                         wandb_dict.update({"loss/loga_loss": loga_loss.numpy(force=True)})
