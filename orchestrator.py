@@ -392,10 +392,10 @@ def train(cfg: DictConfig,
             logger.info(colored(
                 f"tot tt over {tot}steps: {np.sum(ttl)}secs",
                 "magenta", attrs=["reverse"]))
-
-            time_to_targ_ts = (
+            # estimate wallclock training time to target timesteps
+            wc_tt_2_targ_ts = (
                 ((cfg.num_timesteps - agent.timesteps_so_far) / cfg.segment_len) * avg_tt_per_iter)
-            time_to_targ_ts /= 3600  # convert seconds to hours
+            wc_tt_2_targ_ts /= 3600  # convert seconds to hours
 
         i += 1
 
@@ -440,7 +440,7 @@ def train(cfg: DictConfig,
             if avg_tt_per_iter is not None and time_to_targ_ts is not None:
                 wandb_dict.update({
                     "vitals/avg-tt-per-iter": avg_tt_per_iter,
-                    "vitals/time-to-targ-ts": time_to_targ_ts,
+                    "vitals/time-to-targ-ts": wc_tt_2_targ_ts,
                 })
             wandb.log(wandb_dict, step=agent.timesteps_so_far)
 
