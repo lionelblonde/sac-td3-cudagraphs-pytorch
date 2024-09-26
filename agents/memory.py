@@ -135,7 +135,6 @@ class ReplayBuffer(object):
                 new_tensor = torch.Tensor(trn[k]).pin_memory().to(self.device, non_blocking=True)
             else:
                 new_tensor = torch.Tensor(trn[k]).to(self.device)
-
             self.ring_buffers[k].append(v=new_tensor)
 
     @beartype
