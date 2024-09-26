@@ -190,7 +190,7 @@ class Actor(nn.Module):
                  layer_norm: bool):
         super().__init__()
         ob_dim = ob_shape[-1]
-        ac_dim = ac_shape[-1]
+        self.ac_dim = ac_shape[-1]  # used in child class
         self.rms_obs = rms_obs
         self.max_ac = max_ac
         self.layer_norm = layer_norm
@@ -208,7 +208,7 @@ class Actor(nn.Module):
                 ("nl", nn.Mish()),
             ]))),
         ]))
-        self.head = nn.Linear(hid_dims[1], ac_dim)
+        self.head = nn.Linear(hid_dims[1], self.ac_dim)
 
         # perform initialization
         self.fc_stack.apply(init())
