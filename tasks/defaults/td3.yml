@@ -43,13 +43,8 @@ rbx_capacity: 1000000
 polyak: 0.01
 prefer_td3_over_sac: true
 bcq_style_targ_mix: true
-normal_noise_std: 0.1  # TD3
-targ_actor_smoothing: true  # TD3
-td3_std: 0.2  # TD3
-td3_c: 0.5  # TD3
-actor_update_delay: 2  # TD3
-crit_targ_update_freq: 1  # SAC
-alpha_init: 0.1  # SAC
-learnable_alpha: false  # SAC
-log_alpha_lr: 3e-4  # SAC
-state_dependent_std: true  # SAC
+normal_noise_std: 0.1
+targ_actor_smoothing: true
+td3_std: 0.2
+td3_c: 0.5
+actor_update_delay: 2
