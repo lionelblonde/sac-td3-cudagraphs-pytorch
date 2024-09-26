@@ -280,8 +280,8 @@ class Agent(object):
         targ_q = targ_q.detach()
 
         # critic and twin losses
-        crit_loss = ff.smooth_l1_loss(q, targ_q)  # Huber loss for both here and below
-        twin_loss = ff.smooth_l1_loss(twin_q, targ_q)
+        crit_loss = ff.mse_loss(q, targ_q)
+        twin_loss = ff.mse_loss(twin_q, targ_q)
 
         # actor loss
         if self.hps.prefer_td3_over_sac:
