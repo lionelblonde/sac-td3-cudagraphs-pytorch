@@ -17,7 +17,7 @@ from torch.nn import functional as ff
 
 from helpers import logger
 from helpers.normalizer import RunningMoments
-from agents.nets import log_module_info, Actor, Critic
+from agents.nets import log_module_info, Actor, TanhGaussActor, Critic
 from agents.memory import ReplayBuffer
 
 
@@ -82,12 +82,14 @@ class Agent(object):
         self.replay_buffers = replay_buffers
 
         # setup action noise
-        self.ac_noise = NormalActionNoise(
-            mu=torch.zeros(self.ac_shape).to(self.device),
-            sigma=float(self.hps.normal_noise_std) * torch.ones(self.ac_shape).to(self.device),
-            generator=actr_noise_rng,
-        )  # spherical/isotropic additive Normal(0., 0.1) action noise (we set the std via cfg)
-        logger.debug(f"{self.ac_noise} configured")
+        self.ac_noise = None
+        if self.hps.prefer_td3_over_sac:
+            self.ac_noise = NormalActionNoise(
+                mu=torch.zeros(self.ac_shape).to(self.device),
+                sigma=float(self.hps.normal_noise_std) * torch.ones(self.ac_shape).to(self.device),
+                generator=actr_noise_rng,
+            )  # spherical/isotropic additive Normal(0., 0.1) action noise (we set the std via cfg)
+            logger.debug(f"{self.ac_noise} configured")
 
         self.rms_obs = None
         if self.hps.batch_norm:
@@ -101,41 +103,62 @@ class Agent(object):
 
         actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
         actr_net_kwargs = {"layer_norm": self.hps.layer_norm}
-        self.actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
-        self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
+        if not self.hps.prefer_td3_over_sac:
+            actr_net_kwargs.update({
+                "generator": actr_noise_rng, "state_dependent_std": self.hps.state_dependent_std})
+            actr_module = TanhGaussActor
+        else:
+            actr_module = Actor
+        self.actr = actr_module(*actr_net_args, **actr_net_kwargs).to(self.device)
+        if self.hps.prefer_td3_over_sac:
+            # using TD3 (SAC does not use a target actor)
+            self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
+            # note: could use `actr_module` equivalently, but prefer most explicit
 
         crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
         crit_net_kwargs = {"layer_norm": self.hps.layer_norm}
         self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        if self.hps.clipped_double:
-            self.twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
         self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        if self.hps.clipped_double:
-            self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
 
         # initilize the target nets
-        self.targ_actr.load_state_dict(self.actr.state_dict())
+        if self.hps.prefer_td3_over_sac:
+            # using TD3 (SAC does not use a target actor)
+            self.targ_actr.load_state_dict(self.actr.state_dict())
         self.targ_crit.load_state_dict(self.crit.state_dict())
-        if self.hps.clipped_double:
-            self.targ_twin.load_state_dict(self.twin.state_dict())
+        self.targ_twin.load_state_dict(self.twin.state_dict())
 
         # set up the optimizers
         self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actr_lr)
         self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.crit_lr)
-        if self.hps.clipped_double:
-            self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
+        self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
 
         # set up the gradient scalers
         self.actr_sclr = GradScaler(enabled=self.hps.fp16)
         self.crit_sclr = GradScaler(enabled=self.hps.fp16)
-        if self.hps.clipped_double:
-            self.twin_sclr = GradScaler(enabled=self.hps.fp16)
+        self.twin_sclr = GradScaler(enabled=self.hps.fp16)
+        if not self.hps.prefer_td3_over_sac:
+            self.loga_sclr = GradScaler(enabled=self.hps.fp16)
+
+        # setup log(alpha) if SAC is chosen
+        self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
+        # the previous line is here for the alpha property to always exist
+        if (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha:
+            # create learnable Lagrangian multiplier
+            # common trick: learn log(alpha) instead of alpha directly
+            self.log_alpha.requires_grad = True
+            self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
+            self.loga_opt = Adam([self.log_alpha], lr=self.hps.log_alpha_lr)
 
         # log module architectures
         log_module_info(self.actr)
         log_module_info(self.crit)
-        if self.hps.clipped_double:
-            log_module_info(self.twin)
+        log_module_info(self.twin)
+
+    @property
+    def alpha(self):
+        return self.log_alpha.exp()
 
     @beartype
     def sample_trns_batch(self) -> dict[str, torch.Tensor]:
@@ -161,13 +184,26 @@ class Agent(object):
         else:
             ob_tensor = torch.Tensor(ob).to(self.device)
 
-        # predict an action using the policy
-        ac_tensor = self.actr.act(ob_tensor)
-        # if desired, add noise to the predicted action
-        if apply_noise:
-            # apply additive action noise once the action has been predicted,
-            # in combination with parameter noise, or not.
-            ac_tensor += self.ac_noise.generate()
+        if self.ac_noise is not None:
+            # using TD3
+            assert self.hps.prefer_td3_over_sac
+
+            # predict an action using the policy
+            ac_tensor = self.actr.act(ob_tensor)
+            # if desired, add noise to the predicted action
+            if apply_noise:
+                # apply additive action noise once the action has been predicted,
+                # in combination with parameter noise, or not.
+                ac_tensor += self.ac_noise.generate()
+        else:
+            # using SAC
+            assert not self.hps.prefer_td3_over_sac
+            if apply_noise:
+                ac_tensor = self.actr.sample(
+                    ob_tensor, stop_grad=True)
+            else:
+                ac_tensor = self.actr.mode(
+                    ob_tensor, stop_grad=True)
 
         # place on cpu as a numpy array
         ac = ac_tensor.numpy(force=True)
@@ -184,8 +220,33 @@ class Agent(object):
                        reward: torch.Tensor,
                        done: torch.Tensor,
                        td_len: torch.Tensor,
-        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Compute the critic and actor losses"""
+
+        loga_loss = None  # unused if using TD3
+
+        if self.hps.prefer_td3_over_sac:
+            # using TD3
+            action_from_actr = self.actr.act(state)
+            log_prob = None  # quiets down the type checker
+        else:
+            # using SAC
+            action_from_actr = self.actr.sample(state, stop_grad=False)
+            log_prob = self.actr.logp(state, action_from_actr, self.max_ac)
+            # here, there are two gradient pathways: the reparam trick makes the sampling process
+            # differentiable (pathwise derivative), and logp is a score function gradient estimator
+            # intuition: aren't they competing and therefore messing up with each other's compute
+            # graphs? to understand what happens, write down the closed form of the Normal's logp
+            # (or see this formula in nets.py) and replace x by mean + eps * std
+            # it shows that with both of these gradient pathways, the mean receives no gradient
+            # only the std receives some (they cancel out)
+            # moreover, if only the std receives gradient, we can expect subpar results if this std
+            # is state independent
+            # this can be observed here, and has been noted in openai/spinningup
+            # in native PyTorch, it is equivalent to using `log_prob` on a sample from `rsample`
+            # note also that detaching the action in the logp (using `sample`, and not `rsample`)
+            # yields to poor results, showing how allowing for non-zero gradients for the mean
+            # can have a destructive effect, and that is why SAC does not allow them to flow.
 
         # compute qz estimates
         q = self.crit(state, action)
@@ -202,6 +263,11 @@ class Agent(object):
             # use TD3 style of target mixing: hard minimum
             q_prime = torch.min(q_prime, twin_q_prime)
 
+        if not self.hps.prefer_td3_over_sac:  # only for SAC
+            # add the causal entropy regularization term
+            next_log_prob = self.actr.logp(next_state, next_action, self.max_ac)
+            q_prime -= self.alpha.detach() * next_log_prob
+
         # assemble the Bellman target
         targ_q = (reward + (self.hps.gamma ** td_len) * (1. - done) * q_prime)
 
@@ -209,14 +275,23 @@ class Agent(object):
 
         # critic and twin losses
         crit_loss = ff.smooth_l1_loss(q, targ_q)  # Huber loss for both here and below
-        twin_loss = ff.smooth_l1_loss(twin_q, targ_q)  # overwrites the None initially set
+        twin_loss = ff.smooth_l1_loss(twin_q, targ_q)
 
         # actor loss
-        actr_loss = -self.crit(state, self.actr.act(state))
+        if self.hps.prefer_td3_over_sac:
+            actr_loss = -self.crit(state, action_from_actr).mean()
+        else:
+            actr_loss = (self.alpha.detach() * log_prob) - torch.min(
+                self.crit(state, action_from_actr),
+                self.twin(state, action_from_actr)).mean()
+            if not actr_loss.mean().isfinite():
+                raise ValueError("NaNs: numerically unstable arctanh func")
 
-        actr_loss = actr_loss.mean()
+        if (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha:
+            assert log_prob is not None
+            loga_loss = (self.log_alpha * (-log_prob - self.targ_ent).detach()).mean()
 
-        return actr_loss, crit_loss, twin_loss
+        return actr_loss, crit_loss, twin_loss, loga_loss
 
     @beartype
     def update_actr_crit(self,
@@ -240,20 +315,27 @@ class Agent(object):
                 self.rms_obs.update(state)
 
         # compute target action
-        if self.hps.targ_actor_smoothing:
-            n_ = action.clone().detach().normal_(0., self.hps.td3_std).to(self.device)
-            n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
-            next_action = (
-                self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
+        if self.hps.prefer_td3_over_sac:
+            # using TD3
+            if self.hps.targ_actor_smoothing:
+                n_ = action.clone().detach().normal_(0., self.hps.td3_std).to(self.device)
+                n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
+                next_action = (
+                    self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
+            else:
+                next_action = self.targ_actr.act(next_state)
         else:
-            next_action = self.targ_actr.act(next_state)
+            # using SAC
+            next_action = self.actr.sample(next_state, stop_grad=True)
 
         # compute critic and actor losses
         with self.ctx:
-            actr_loss, crit_loss, twin_loss = self.compute_losses(
+            actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
                 state, action, next_state, next_action, reward, done, td_len)
 
-        if update_actr:
+        if update_actr or (not self.hps.prefer_td3_over_sac):
+            # choice: for SAC, always update the actor and log(alpha)
+
             # update actor
             self.actr_opt.zero_grad()
             actr_loss = self.actr_sclr.scale(actr_loss)
@@ -266,9 +348,22 @@ class Agent(object):
 
             self.actr_updates_so_far += 1
 
+            if loga_loss is not None:
+                # update log(alpha), and therefore alpha
+                assert (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha
+                self.loga_opt.zero_grad()
+                loga_loss = self.loga_sclr.scale(loga_loss)
+                loga_loss.backward()
+                self.loga_sclr.step(self.loga_opt)
+
             if (nups := self.actr_updates_so_far) % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
                 wandb_dict = {"loss/actr_loss": actr_loss.numpy(force=True),
                               "nups/actr_updates_so_far": nups}
+                if not self.hps.prefer_td3_over_sac:
+                    # using SAC
+                    wandb_dict.update({"vitals/alpha": self.alpha.numpy(force=True)})
+                    if loga_loss is not None:
+                        wandb_dict.update({"loss/loga_loss": loga_loss.numpy(force=True)})
                 wandb.log(wandb_dict, step=self.timesteps_so_far)
 
         # update critic
@@ -295,29 +390,32 @@ class Agent(object):
             wandb.log(wandb_dict, step=self.timesteps_so_far)
 
         # update target nets
-        self.update_target_net()
+        if (self.hps.prefer_td3_over_sac or (
+            self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0)):
+            self.update_target_net()
 
     @beartype
     def update_target_net(self):
         """Update the target networks"""
 
         with torch.no_grad():
-            for param, targ_param in zip(self.actr.parameters(),
-                                         self.targ_actr.parameters()):
-                new_param = self.hps.polyak * param
-                new_param += (1. - self.hps.polyak) * targ_param
-                targ_param.copy_(new_param)
+            if self.hps.prefer_td3_over_sac:
+                # using TD3 (SAC does not use a target actor)
+                for param, targ_param in zip(self.actr.parameters(),
+                                             self.targ_actr.parameters()):
+                    new_param = self.hps.polyak * param
+                    new_param += (1. - self.hps.polyak) * targ_param
+                    targ_param.copy_(new_param)
             for param, targ_param in zip(self.crit.parameters(),
                                          self.targ_crit.parameters()):
                 new_param = self.hps.polyak * param
                 new_param += (1. - self.hps.polyak) * targ_param
                 targ_param.copy_(new_param)
-            if self.hps.clipped_double:
-                for param, targ_param in zip(self.twin.parameters(),
-                                             self.targ_twin.parameters()):
-                    new_param = self.hps.polyak * param
-                    new_param += (1. - self.hps.polyak) * targ_param
-                    targ_param.copy_(new_param)
+            for param, targ_param in zip(self.twin.parameters(),
+                                         self.targ_twin.parameters()):
+                new_param = self.hps.polyak * param
+                new_param += (1. - self.hps.polyak) * targ_param
+                targ_param.copy_(new_param)
 
     @beartype
     def save(self, path: Path, sfx: Optional[str] = None):
@@ -334,17 +432,15 @@ class Agent(object):
             # and now the state_dict objects
             "actr": self.actr.state_dict(),
             "crit": self.crit.state_dict(),
+            "twin": self.twin.state_dict(),
             "actr_opt": self.actr_opt.state_dict(),
             "crit_opt": self.crit_opt.state_dict(),
+            "twin_opt": self.twin_opt.state_dict(),
         }
         if self.hps.batch_norm:
             assert self.rms_obs is not None
             checkpoint.update({
                 "rms_obs": self.rms_obs.state_dict()})
-        if self.hps.clipped_double:
-            checkpoint.update({
-                "twin": self.twin.state_dict(),
-                "twin_opt": self.twin_opt.state_dict()})
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
         logger.warn(f"{sfx} model saved to disk")
@@ -367,18 +463,15 @@ class Agent(object):
         self.crit.load_state_dict(checkpoint["crit"])
         self.actr_opt.load_state_dict(checkpoint["actr_opt"])
         self.crit_opt.load_state_dict(checkpoint["crit_opt"])
-        if self.hps.clipped_double:
-            if "twin" in checkpoint:
-                self.twin.load_state_dict(checkpoint["twin"])
-                if "twin_opt" in checkpoint:
-                    self.twin_opt.load_state_dict(checkpoint["twin_opt"])
-                else:
-                    logger.warn("twin opt is missing from the loaded ckpt!")
-                    logger.warn("we move on nonetheless, from a fresh opt")
+        if "twin" in checkpoint:
+            self.twin.load_state_dict(checkpoint["twin"])
+            if "twin_opt" in checkpoint:
+                self.twin_opt.load_state_dict(checkpoint["twin_opt"])
             else:
-                raise IOError("no twin found in checkpoint ckpt file")
-        elif "twin" in checkpoint:  # in the case where clipped double is off
-            logger.warn("there is a twin the loaded ckpt, but you want none")
+                logger.warn("twin opt is missing from the loaded ckpt!")
+                logger.warn("we move on nonetheless, from a fresh opt")
+        else:
+            raise IOError("no twin found in checkpoint ckpt file")
 
     @beartype
     @staticmethod
