@@ -437,7 +437,7 @@ def train(cfg: DictConfig,
                 "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
                 # taking the first because this one will always exist whatever the numenv
             }
-            if avg_tt_per_iter is not None and time_to_targ_ts is not None:
+            if avg_tt_per_iter is not None and wc_tt_2_targ_ts is not None:
                 wandb_dict.update({
                     "vitals/avg-tt-per-iter": avg_tt_per_iter,
                     "vitals/time-to-targ-ts": wc_tt_2_targ_ts,
