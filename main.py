@@ -103,6 +103,10 @@ class MagicRunner(object):
 
         # slight overwrite for consistency, before setting to read-only
         self._cfg.num_env = self._cfg.numenv if self._cfg.vectorized else 1
+        if self._cfg.num_env > 1:
+            assert self._cfg.batch_size >= self._cfg.num_env
+            # override batch size to preserve batch size in cfg
+            self._cfg.batch_size //= self._cfg.num_env
 
         # set the cfg to read-only for safety
         OmegaConf.set_readonly(self._cfg, value=True)
