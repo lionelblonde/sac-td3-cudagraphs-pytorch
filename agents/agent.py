@@ -363,6 +363,7 @@ class Agent(object):
                 loga_loss = self.loga_sclr.scale(loga_loss)
                 loga_loss.backward()
                 self.loga_sclr.step(self.loga_opt)
+                self.loga_sclr.update()
 
             if (nups := self.actr_updates_so_far) % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
                 wandb_dict = {"loss/actr_loss": actr_loss.numpy(force=True),
