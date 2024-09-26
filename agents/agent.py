@@ -89,8 +89,8 @@ class Agent(object):
 
         # create online and target nets
 
-        actr_hid_dims = (400, 300)
-        crit_hid_dims = (400, 300)
+        actr_hid_dims = (256, 256)
+        crit_hid_dims = (256, 256)
 
         actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
         actr_net_kwargs = {"layer_norm": self.hps.layer_norm}
