@@ -367,6 +367,10 @@ def train(cfg: DictConfig,
             f"interaction time: {timer() - its}secs",
             "green"))
 
+        if agent.timesteps_so_far <= cfg.learning_starts:
+            i += 1
+            continue  # only start training when enough data has been collected
+
         logger.info(("train").upper())
 
         tts = timer()

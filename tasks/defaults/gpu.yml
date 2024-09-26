@@ -14,9 +14,10 @@ ini_rando_steps: 25000
 wandb_project: "calico"
 
 # training mode
+learning_starts: 10000
 num_timesteps: 1000000
 training_steps_per_iter: 1
-eval_steps_per_iter: 100
+eval_steps_per_iter: 10
 eval_every: 100
 
 # evaluation mode
