@@ -129,6 +129,8 @@ def segment(env: Union[Env, VectorEnv],
 
         # interact with env
         new_ob, rew, terminated, truncated, info = env.step(ac)
+        if num_env == 1:
+            rew = np.array([rew])
         rew = rearrange(rew, "b -> b 1")
 
         if num_env > 1:
