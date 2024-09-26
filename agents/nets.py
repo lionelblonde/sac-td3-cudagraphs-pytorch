@@ -15,7 +15,7 @@ from helpers.normalizer import RunningMoments
 
 STANDARDIZED_OB_CLAMPS = [-5., 5.]
 ARCTANH_EPS = 1e-8
-SAC_LOG_STD_BOUNDS = [-20., 2.]
+SAC_LOG_STD_BOUNDS = [-5., 2.]
 
 
 @beartype
