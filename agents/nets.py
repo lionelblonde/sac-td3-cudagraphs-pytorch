@@ -142,7 +142,8 @@ class Critic(nn.Module):
                  hid_dims: tuple[int, int],
                  rms_obs: Optional[RunningMoments],
                  *,
-                 layer_norm: bool):
+                 layer_norm: bool,
+                 use_mish_over_relu: bool):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
@@ -154,12 +155,12 @@ class Critic(nn.Module):
             ("fc_block_1", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.Mish()),
+                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.Mish()),
+                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], 1)
@@ -187,7 +188,8 @@ class Actor(nn.Module):
                  rms_obs: Optional[RunningMoments],
                  max_ac: float,
                  *,
-                 layer_norm: bool):
+                 layer_norm: bool,
+                 use_mish_over_relu: bool):
         super().__init__()
         ob_dim = ob_shape[-1]
         self.ac_dim = ac_shape[-1]  # used in child class
@@ -200,12 +202,12 @@ class Actor(nn.Module):
             ("fc_block_1", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(ob_dim, hid_dims[0])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.Mish()),
+                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.Mish()),
+                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], self.ac_dim)
@@ -234,8 +236,15 @@ class TanhGaussActor(Actor):
                  *,
                  generator: torch.Generator,
                  state_dependent_std: bool,
-                 layer_norm: bool):
-        super().__init__(ob_shape, ac_shape, hid_dims, rms_obs, max_ac, layer_norm=layer_norm)
+                 layer_norm: bool,
+                 use_mish_over_relu: bool):
+        super().__init__(ob_shape,
+                         ac_shape,
+                         hid_dims,
+                         rms_obs,
+                         max_ac,
+                         layer_norm=layer_norm,
+                         use_mish_over_relu=use_mish_over_relu)
         self.rng = generator
         self.state_dependent_std = state_dependent_std
         # overwrite head

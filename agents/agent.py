@@ -102,7 +102,8 @@ class Agent(object):
         crit_hid_dims = (256, 256)
 
         actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
-        actr_net_kwargs = {"layer_norm": self.hps.layer_norm}
+        actr_net_kwargs = {
+            "layer_norm": self.hps.layer_norm, "use_mish_over_relu": self.hps.use_mish_over_relu}
         if not self.hps.prefer_td3_over_sac:
             actr_net_kwargs.update({
                 "generator": actr_noise_rng, "state_dependent_std": self.hps.state_dependent_std})
