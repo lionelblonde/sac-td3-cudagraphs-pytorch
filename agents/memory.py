@@ -131,7 +131,11 @@ class ReplayBuffer(object):
         for k in self.ring_buffers:
             if not isinstance(trn[k], np.ndarray):
                 raise TypeError(k)
-            new_tensor = torch.Tensor(trn[k]).to(self.device)  # cap T tensor to force FloatTensor
+            if self.device.type == "cuda":
+                new_tensor = torch.Tensor(trn[k]).pin_memory().to(self.device, non_blocking=True)
+            else:
+                new_tensor = torch.Tensor(trn[k]).to(self.device)
+
             self.ring_buffers[k].append(v=new_tensor)
 
     @beartype
