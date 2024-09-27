@@ -338,8 +338,7 @@ class Agent(object):
             actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
                 state, action, next_state, next_action, reward, done, td_len)
 
-        if update_actr or (not self.hps.prefer_td3_over_sac):
-            # choice: for SAC, always update the actor and log(alpha)
+        if update_actr:
 
             # update actor
             self.actr_opt.zero_grad()
