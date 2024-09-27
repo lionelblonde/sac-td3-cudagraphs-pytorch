@@ -147,7 +147,7 @@ class Agent(object):
             # setup log(alpha) if SAC is chosen
             self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
 
-            if self.hps.learnable_alpha:
+            if self.hps.autotune:
                 # create learnable Lagrangian multiplier
                 # common trick: learn log(alpha) instead of alpha directly
                 self.log_alpha.requires_grad = True
@@ -292,7 +292,7 @@ class Agent(object):
                 raise ValueError("NaNs: numerically unstable arctanh func")
         actr_loss = actr_loss.mean()
 
-        if (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha:
+        if (not self.hps.prefer_td3_over_sac) and self.hps.autotune:
             assert log_prob is not None
             loga_loss = (self.log_alpha * (-log_prob - self.targ_ent).detach()).mean()
 
@@ -355,7 +355,7 @@ class Agent(object):
 
             if loga_loss is not None:
                 # update log(alpha), and therefore alpha
-                assert (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha
+                assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
                 self.loga_opt.zero_grad()
                 loga_loss = self.loga_sclr.scale(loga_loss)
                 loga_loss.backward()
