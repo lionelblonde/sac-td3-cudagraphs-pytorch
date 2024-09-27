@@ -117,6 +117,7 @@ class MagicRunner(object):
         if self._cfg.cuda:
             # use cuda
             assert torch.cuda.is_available()
+            torch.cuda.manual_seed_all(self._cfg.seed)
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
             device = torch.device("cuda:0")
@@ -152,8 +153,8 @@ class MagicRunner(object):
         device = self.setup_device()
 
         # seed
+        random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
         torch.manual_seed(self._cfg.seed)
-        torch.cuda.manual_seed_all(self._cfg.seed)
 
         # env
         env, net_shapes, erb_shapes, max_ac = make_env(
