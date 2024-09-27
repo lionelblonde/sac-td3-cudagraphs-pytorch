@@ -18,34 +18,36 @@ from helpers import logger
 from main import make_uuid
 
 
-ENV_BUNDLES = {
+ENV_BUNDLES: dict[str, list[str]] = {
     "debug": [
-        "Walker2d-v4",
-    ],
-    "suite": [
-        "Ant-v4",
-        "HalfCheetah-v4",
         "Hopper-v4",
-        "HumanoidStandup-v4",
-        "Humanoid-v4",
+    ],
+    "low": [
+        "InvertedPendulum-v4"
         "InvertedDoublePendulum-v4",
-        "InvertedPendulum-v4",
+    ],
+    "medium": [
+        "Hopper-v4",
+        "HalfCheetah-v4",
+        "Walker2d-v4",
         "Pusher-v4",
-        "Reacher-v4",
-        "Swimmer-v4",
-        "Walker2d-v4",
-    ],
-    "priority": [
         "Ant-v4",
-        "HalfCheetah-v4",
-        "Hopper-v4",
-        "HumanoidStandup-v4",
+    ],
+    "high": [
         "Humanoid-v4",
-        "InvertedDoublePendulum-v4",
-        "Walker2d-v4",
+        "HumanoidStandup-v4",
     ],
 }
+# for each environment bundle, set the GPU mem to request
+GPU_MEM_MAP: dict[str, int] = {
+    "debug": 10,
+    "low": 2,
+    "medium": 10,
+    "high": 20,
+}
+assert set(ENV_BUNDLES.keys()) == set(GPU_MEM_MAP.keys())
 
+GPU_MEMORY = 20
 MEMORY = 32
 NUM_NODES = 1
 NUM_WORKERS = 4
@@ -90,9 +92,7 @@ class Spawner(object):
         logger.info(OmegaConf.to_yaml(self._cfg))
 
         # assemble wandb project name
-        proj = self._cfg.wandb_project.upper()
-        depl = self.deployment.upper()
-        self.wandb_project = f"{proj}-{depl}"
+        self.wandb_project = f"{self._cfg.wandb_project}-{self.deployment}"
         # define spawn type
         self.job_type = "sweep" if self.sweep else "fixed"
         # define the needed memory in GB
@@ -130,6 +130,8 @@ class Spawner(object):
 
         # define the set of considered environments from the considered suite
         self.envs = ENV_BUNDLES[env_bundle]
+        # also use the bundle name to determine the GPU memory to request
+        self.gpu_memory = GPU_MEM_MAP[env_bundle]
 
     @beartype
     @staticmethod
@@ -211,10 +213,7 @@ class Spawner(object):
             if self.deployment == "slurm":
                 # Sometimes versions are needed (some clusters)
                 if self._cfg.cuda:
-                    constraint = ""
-                    bash_script_str += ("#SBATCH --gpus=1\n")  # gpus=titan:1 if needed
-                    if constraint:  # if not empty
-                        bash_script_str += (f'#SBATCH --constraint="{constraint}"\n')
+                    bash_script_str += (f"#SBATCH --gres=gpu:1,VramPerGpu:{self.gpu_memory}G\n")
                 bash_script_str += ("\n")
 
             # load modules
