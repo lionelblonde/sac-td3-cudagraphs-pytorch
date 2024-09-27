@@ -25,15 +25,15 @@ from agents.agent import Agent
 
 
 DEBUG = False
-TIME_THRES_VITALS_LOGGING = 1_000
 
 
 @beartype
 def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
     """Save dictionary containing numpy objects to h5py file."""
-    fname = save_dir / Path(f"{name.zfill(3)}.h5")
     for k, v in data.items():
         assert isinstance(v, (np.ndarray, np.floating, np.integer)), f"dict['{k}']: wrong type"
+    ep_len, ep_ret = data["ep_len"]
+    fname = save_dir / Path(f"{name.zfill(3)}.h5")
     with h5py.File(fname, "w") as hf:
         for key in data:
             hf.create_dataset(key, data=data[key])
@@ -391,13 +391,13 @@ def train(cfg: DictConfig,
             tts = timer()
 
         avg_tt_per_iter = None
-        if i > TIME_THRES_VITALS_LOGGING:
-            logger.info(colored(
-                f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",
-                "green", attrs=["reverse"]))
-            logger.info(colored(
-                f"tot tt over {tot}steps: {np.sum(ttl)}secs",
-                "magenta", attrs=["reverse"]))
+
+        logger.info(colored(
+            f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",
+            "green", attrs=["reverse"]))
+        logger.info(colored(
+            f"tot tt over {tot}steps: {np.sum(ttl)}secs",
+            "magenta", attrs=["reverse"]))
 
         i += 1
 
