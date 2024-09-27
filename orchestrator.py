@@ -390,7 +390,7 @@ def train(cfg: DictConfig,
             ttl.append(timer() - tts)
             tts = timer()
 
-        avg_tt_per_iter, wc_tt_2_targ_ts = None, None
+        avg_tt_per_iter = None
         if i > TIME_THRES_VITALS_LOGGING:
             logger.info(colored(
                 f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",
@@ -398,10 +398,6 @@ def train(cfg: DictConfig,
             logger.info(colored(
                 f"tot tt over {tot}steps: {np.sum(ttl)}secs",
                 "magenta", attrs=["reverse"]))
-            # estimate wallclock training time to target timesteps
-            wc_tt_2_targ_ts = (
-                ((cfg.num_timesteps - agent.timesteps_so_far) / cfg.segment_len) * avg_tt_per_iter)
-            wc_tt_2_targ_ts /= 3600  # convert seconds to hours
 
         i += 1
 
@@ -443,10 +439,9 @@ def train(cfg: DictConfig,
                 "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
                 # taking the first because this one will always exist whatever the numenv
             }
-            if avg_tt_per_iter is not None and wc_tt_2_targ_ts is not None:
+            if avg_tt_per_iter is not None:
                 wandb_dict.update({
                     "vitals/avg-tt-per-iter": avg_tt_per_iter,
-                    "vitals/time-to-targ-ts": wc_tt_2_targ_ts,
                 })
             wandb.log(wandb_dict, step=agent.timesteps_so_far)
 
