@@ -13,7 +13,7 @@ action_repeat: 1
 wandb_project: "calico"
 
 # training mode
-num_timesteps: 1000000
+num_timesteps: 10000000
 learning_starts: 5000
 training_steps_per_iter: 1
 eval_steps_per_iter: 10
