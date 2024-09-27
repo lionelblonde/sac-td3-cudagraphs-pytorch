@@ -8,7 +8,6 @@ multi_proc: true
 numenv: 8
 horizon: 1000
 action_repeat: 1
-ini_rando_steps: 25000
 
 # logging
 wandb_project: "calico"
