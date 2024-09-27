@@ -135,24 +135,7 @@ class Spawner(object):
     @staticmethod
     def copy_and_add_seed(hpmap: dict[str, Any], seed: int) -> dict[str, Any]:
         hpmap_ = deepcopy(hpmap)
-
-        # add the seed and edit the job uuid to only differ by the seed
         hpmap_.update({"seed": seed})
-
-        # enrich the uuid with extra information
-        gitsha = ""
-        try:
-            out = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
-            sha = out.strip().decode("ascii")
-            gitsha = f"gitSHA_{sha}"
-        except OSError:
-            pass
-
-        # update uuid in map
-        uuid = f"{hpmap['uuid']}.{gitsha}.{hpmap['env_id']}_wkrs{NUM_WORKERS}"
-        uuid += f".seed{str(seed).zfill(2)}"  # add seed
-        hpmap_.update({"uuid": uuid})
-
         return hpmap_
 
     @beartype
