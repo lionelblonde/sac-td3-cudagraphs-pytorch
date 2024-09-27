@@ -32,8 +32,7 @@ def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
     """Save dictionary containing numpy objects to h5py file."""
     for k, v in data.items():
         assert isinstance(v, (np.ndarray, np.floating, np.integer)), f"dict['{k}']: wrong type"
-    ep_len, ep_ret = data["ep_len"]
-    fname = save_dir / Path(f"{name.zfill(3)}.h5")
+    fname = save_dir / Path(f"{name}.h5")
     with h5py.File(fname, "w") as hf:
         for key in data:
             hf.create_dataset(key, data=data[key])
@@ -42,8 +41,7 @@ def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
     data, stts = load_dict_h5py(fname)
     for k, v in (data | stts).items():  # Python 3.9 introduced "|" op for merging dicts
         logger.warn(k, type(v))
-    del data
-    del stts
+    del data, stts
 
 
 gather_roll = save_dict_h5py  # alias
@@ -425,14 +423,14 @@ def train(cfg: DictConfig,
                 agent.save(ckpt_dir, sfx="best")
                 logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
 
-            # log stats in csv
+            # log with logger
             logger.record_tabular("timestep", agent.timesteps_so_far)
             for kv in eval_metrics.items():
                 logger.record_tabular(*kv)
             logger.info("dumping stats in .csv file")
             logger.dump_tabular()
 
-            # log stats in dashboard
+            # log with wandb
             assert agent.replay_buffers is not None
             wandb_dict = {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
@@ -493,11 +491,24 @@ def evaluate(cfg: DictConfig,
         len_buff.append(ep_len)
         ret_buff.append(ep_ret)
 
+        name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
+
         if cfg.gather:
             # gather episode in file
-            gather_roll(rol_dir, str(i), traj)
+            gather_roll(rol_dir, name, traj)
 
         if cfg.record:
             # record a video of the episode
-            frame_collection = env.render()  # ref: https://younis.dev/blog/render-api/
-            record_video(vid_dir, str(i), np.array(frame_collection))
+            frame_collection = env.render()
+            record_video(vid_dir, name, np.array(frame_collection))
+
+    eval_metrics: dict[str, np.floating] = {  # type-checker
+        "length": np.mean(np.array(len_buff)),
+        "return": np.mean(np.array(ret_buff))}
+
+    # log with logger
+    logger.record_tabular("timestep", agent.timesteps_so_far)
+    for kv in eval_metrics.items():
+        logger.record_tabular(*kv)
+    logger.info("dumping stats in .csv file")
+    logger.dump_tabular()
