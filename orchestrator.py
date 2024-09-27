@@ -361,7 +361,7 @@ def train(cfg: DictConfig,
         logger.info(("interact").upper())
         its = timer()
         next(roll_gen)  # no need to get the returned segment, stored in buffer
-        agent.timesteps_so_far += (cfg.segment_len * cfg.num_env)
+        agent.timesteps_so_far += cfg.segment_len
         logger.info(f"so far {prettify_numb(agent.timesteps_so_far)} steps made")
         logger.info(colored(
             f"interaction time: {timer() - its}secs",
