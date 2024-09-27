@@ -184,7 +184,10 @@ class Agent(object):
     def predict(self, ob: np.ndarray, *, apply_noise: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
         # create tensor from the state (`require_grad=False` by default)
-        ob_tensor = torch.Tensor(ob).to(self.device)
+        if self.hps.cuda:
+            ob_tensor = torch.Tensor(ob).pin_memory().to(self.device, non_blocking=True)
+        else:
+            ob_tensor = torch.Tensor(ob).to(self.device)
 
         if self.ac_noise is not None:
             # using TD3
