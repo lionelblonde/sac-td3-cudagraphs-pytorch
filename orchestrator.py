@@ -501,12 +501,3 @@ def evaluate(cfg: DictConfig,
             # record a video of the episode
             frame_collection = env.render()  # ref: https://younis.dev/blog/render-api/
             record_video(vid_dir, str(i), np.array(frame_collection))
-
-    eval_metrics = {"ep_len": len_buff, "ep_ret": ret_buff}
-
-    # log stats in csv
-    logger.record_tabular("timestep", agent.timesteps_so_far)
-    for k, v in eval_metrics.items():
-        logger.record_tabular(f"{k}-mean", np.mean(v))
-    logger.info("dumping stats in .csv file")
-    logger.dump_tabular()
