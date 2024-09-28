@@ -34,7 +34,8 @@ class NormalActionNoise(object):
 
     @beartype
     def generate(self):
-        return torch.normal(self.mu, self.sigma, generator=self.rng).to(self.device)
+        noise = torch.randn(self.mu.size(), generator=self.rng, device=self.device)
+        return self.mu + (noise * self.sigma)
 
     @beartype
     def __repr__(self):
@@ -85,8 +86,10 @@ class Agent(object):
         self.ac_noise = None
         if self.hps.prefer_td3_over_sac:
             self.ac_noise = NormalActionNoise(
-                mu=torch.zeros(self.ac_shape).to(self.device),
-                sigma=float(self.hps.normal_noise_std) * torch.ones(self.ac_shape).to(self.device),
+                mu=torch.zeros(self.ac_shape,
+                               device=self.device),
+                sigma=float(self.hps.normal_noise_std) * torch.ones(self.ac_shape,
+                                                                    device=self.device),
                 generator=actr_noise_rng,
             )  # spherical/isotropic additive Normal(0., 0.1) action noise (we set the std via cfg)
             logger.debug(f"{self.ac_noise} configured")
@@ -319,7 +322,8 @@ class Agent(object):
         if self.hps.prefer_td3_over_sac:
             # using TD3
             if self.hps.targ_actor_smoothing:
-                n_ = action.clone().detach().normal_(0., self.hps.td3_std).to(self.device)
+                n_ = action.clone().detach().normal_(0., self.hps.td3_std)
+                assert n_.device == self.device
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
                 next_action = (
                     self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
