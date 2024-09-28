@@ -90,7 +90,7 @@ class NormalToolkit(object):
     @staticmethod
     def sample(mean: torch.Tensor, std: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
         # re-parametrization trick
-        eps = torch.empty(mean.size()).to(mean.device).normal_(generator=generator)
+        eps = torch.empty(mean.size(), device=mean.device).normal_(generator=generator)
         eps.requires_grad = False
         return mean + (std * eps)
 
