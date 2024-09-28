@@ -1,10 +1,12 @@
 import os
 import time
 import h5py
+import tqdm
 from pathlib import Path
 from functools import partial
 from typing import Union, Callable
 from contextlib import contextmanager
+from collections import deque
 
 from beartype import beartype
 from omegaconf import OmegaConf, DictConfig
@@ -261,8 +263,8 @@ def episode(env: Env,
         if "final_info" in infos:
             assert len(infos["final_info"]) == 1
             for info in infos["final_info"]:
-                ep_len = np.int64(info["episode"]["l"])
-                ep_ret = np.float64(info["episode"]["r"])
+                ep_len = float(info["episode"]["l"])
+                ep_ret = float(info["episode"]["r"])
 
             obs0 = np.array(obs0)
             acs0 = np.array(acs0)
@@ -310,7 +312,7 @@ def train(cfg: DictConfig,
 
     # save the model as a dry run, to avoid bad surprises at the end
     agent.save(ckpt_dir, sfx="dryrun")
-    logger.warn(f"dry run -- saved model @:\n{ckpt_dir}")
+    logger.info(f"dry run -- saved model @: {ckpt_dir}")
 
     # group by everything except the seed, which is last, hence index -1
     # it groups by uuid + gitSHA + env_id
@@ -361,30 +363,32 @@ def train(cfg: DictConfig,
     i = 0
     start_time = None
     measure_burnin = None
+    pbar = tqdm.tqdm(range(cfg.num_timesteps))
+    maxlen = 20 * cfg.eval_steps
+    len_buff, ret_buff = deque(maxlen=maxlen), deque(maxlen=maxlen)
+    time_spent_eval = 0
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
-        if i % cfg.eval_every == 0:
-            logger.warn((f"iter#{i}").upper())
-
-        if agent.timesteps_so_far == (cfg.measure_burnin + cfg.learning_starts):
+        if ((agent.timesteps_so_far >= (cfg.measure_burnin + cfg.learning_starts) and
+             start_time is None)):
             start_time = time.time()
             measure_burnin = agent.timesteps_so_far
 
         logger.info(("interact").upper())
         next(roll_gen)
-        agent.timesteps_so_far += cfg.segment_len
+        agent.timesteps_so_far += (increment := cfg.segment_len * cfg.num_env)
+        pbar.update(increment)
         logger.info(f"so far {prettify_numb(agent.timesteps_so_far)} steps made")
 
         if agent.timesteps_so_far <= cfg.learning_starts:
+            # start training when enough data
+            pbar.set_description("not learning yet")
             i += 1
-            continue  # only start training when enough data has been collected
+            continue
 
         logger.info(("train").upper())
-
         for _ in range(cfg.training_steps_per_iter):
-
-            # sample a batch of transitions and trajectories
             trns_batch = agent.sample_trns_batch()
             # determine if updating the actr
             update_actr = True
@@ -393,61 +397,71 @@ def train(cfg: DictConfig,
             # update the actor and critic
             agent.update_actr_crit(trns_batch, update_actr=update_actr)
 
-        if (i % cfg.eval_every == 0) and start_time is not None:
-
-            assert measure_burnin is not None
-            # compute the speed in steps per second
-            speed = (agent.timesteps_so_far - measure_burnin) / (time.time() - start_time)
-
+        if (agent.timesteps_so_far % cfg.eval_every == 0):
             logger.info(("eval").upper())
-            len_buff, ret_buff = [], []
+            eval_start = time.time()
 
-            for _ in range(cfg.eval_steps_per_iter):
-
-                # sample an episode
+            for _ in range(cfg.eval_steps):
                 ep = next(ep_gen)
-
                 len_buff.append(ep["ep_len"])
                 ret_buff.append(ep["ep_ret"])
 
-            eval_metrics: dict[str, np.floating] = {  # type-checker
-                "length": np.mean(np.array(len_buff)),
-                "return": np.mean(np.array(ret_buff))}
+            with torch.no_grad():
+                eval_metrics = {
+                    "length": torch.tensor(list(len_buff), dtype=torch.float).mean(),
+                    "return": torch.tensor(list(ret_buff), dtype=torch.float).mean(),
+                }
 
             if (new_best := eval_metrics["return"].item()) > agent.best_eval_ep_ret:
                 # save the new best model
                 agent.best_eval_ep_ret = new_best
                 agent.save(ckpt_dir, sfx="best")
-                logger.warn(f"new best eval! -- saved model @:\n{ckpt_dir}")
+                logger.info(f"new best eval! -- saved model @: {ckpt_dir}")
 
             # log with logger
             logger.record_tabular("timestep", agent.timesteps_so_far)
-            for kv in eval_metrics.items():
-                logger.record_tabular(*kv)
-            logger.info("dumping stats in .csv file")
+            for k, v in eval_metrics.items():
+                logger.record_tabular(k, v.numpy())
             logger.dump_tabular()
 
             # log with wandb
             assert agent.replay_buffers is not None
             log = {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
-                "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
             }
             wandb.log(
                 {
                     **log,
-                    "vitals/speed": speed,
                 },
                 step=agent.timesteps_so_far,
             )
+
+            time_spent_eval += time.time() - eval_start
+
+            if start_time is not None:
+                assert measure_burnin is not None
+                # compute the speed in steps per second
+                speed = (
+                    (agent.timesteps_so_far - measure_burnin) /
+                    (time.time() - start_time - time_spent_eval)
+                )
+                desc = f"speed={speed: 4.4f} sps"
+                pbar.set_description(desc)
+                wandb.log(
+                    {
+                        "vitals/speed": speed,
+                    },
+                    step=agent.timesteps_so_far,
+                )
 
         i += 1
 
     # save once we are done
     agent.save(ckpt_dir, sfx="done")
-    logger.warn(f"we are done -- saved model @:\n{ckpt_dir}\nbye.")
+    logger.info(f"we are done -- saved model @: {ckpt_dir}")
     # mark a run as finished, and finish uploading all data (from docs)
     wandb.finish()
+    logger.warn("bye")
 
 
 @beartype

@@ -54,7 +54,7 @@ class Agent(object):
         self.actr_updates_so_far = 0
         self.crit_updates_so_far = 0
 
-        self.best_eval_ep_ret = -np.inf  # updated in orchestrator
+        self.best_eval_ep_ret = -float("inf")  # updated in orchestrator
 
         assert self.hps.segment_len <= self.hps.batch_size
         if self.hps.clip_norm <= 0:
@@ -407,11 +407,11 @@ class Agent(object):
                 "rms_obs": self.rms_obs.state_dict()})
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
-        logger.warn(f"{sfx} model saved to disk")
+        logger.info(f"{sfx} model saved to disk")
         if sfx == "best":
             # upload the model to wandb servers
             wandb.save(str(path), base_path=parent)
-            logger.warn("model saved to wandb")
+            logger.info("model saved to wandb")
 
     @beartype
     def load_from_disk(self, path: Path):
@@ -432,8 +432,8 @@ class Agent(object):
             if "twin_opt" in checkpoint:
                 self.twin_opt.load_state_dict(checkpoint["twin_opt"])
             else:
-                logger.warn("twin opt is missing from the loaded ckpt!")
-                logger.warn("we move on nonetheless, from a fresh opt")
+                logger.info("twin opt is missing from the loaded ckpt!")
+                logger.info("we move on nonetheless, from a fresh opt")
         else:
             raise IOError("no twin found in checkpoint ckpt file")
 
