@@ -162,16 +162,18 @@ class Agent(object):
         """Predict an action, with or without perturbation"""
         ob_tensor = torch.as_tensor(ob, device=self.device, dtype=torch.float)
         if self.hps.prefer_td3_over_sac:
-            # using TD3
-            ac_tensor = (self.actr(ob_tensor)
-                         if explore
-                         else self.actr.explore(ob_tensor))
+            with torch.no_grad():
+                # using TD3
+                ac_tensor = (self.actr(ob_tensor)
+                             if explore
+                             else self.actr.explore(ob_tensor))
         else:
             # using SAC
+            # actions from sample and mode are detached by default
             ac_tensor = (self.actr.sample(ob_tensor)
                          if explore
                          else self.actr.mode(ob_tensor))
-        return ac_tensor.clamp(self.min_ac, self.max_ac).detach().cpu().numpy()
+        return ac_tensor.clamp(self.min_ac, self.max_ac).cpu().numpy()
 
     @beartype
     def compute_losses(self,

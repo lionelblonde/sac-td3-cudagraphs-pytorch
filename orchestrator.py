@@ -99,9 +99,6 @@ def segment(env: Union[Env, VectorEnv],
             learning_starts: int,
             action_repeat: int):
 
-    assert isinstance(env.action_space, gym.spaces.Box)  # to ensure `high` and `low` exist
-    ac_low, ac_high = env.action_space.low, env.action_space.high
-
     ob, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
     ac = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
 
@@ -119,9 +116,6 @@ def segment(env: Union[Env, VectorEnv],
             else:
                 assert isinstance(ob, np.ndarray)
                 ac = agent.predict(ob, explore=True)
-                # nan-proof and clip
-                ac = np.nan_to_num(ac)
-                ac = np.clip(ac, ac_low, ac_high)
 
         if t > 0 and t % segment_len == 0:
             yield
@@ -217,9 +211,6 @@ def episode(env: Env,
     # `append` operation is also significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
 
-    assert isinstance(env.action_space, gym.spaces.Box)  # to ensure `high` and `low` exist
-    ac_low, ac_high = env.action_space.low, env.action_space.high
-
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
 
     def randomize_seed() -> int:
@@ -240,9 +231,6 @@ def episode(env: Env,
 
         # predict action
         ac = agent.predict(ob, explore=False)
-        # nan-proof and clip
-        ac = np.nan_to_num(ac)
-        ac = np.clip(ac, ac_low, ac_high)
 
         obs0.append(ob)
         acs0.append(ac)

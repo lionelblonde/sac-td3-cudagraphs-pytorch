@@ -165,13 +165,13 @@ class Critic(nn.Module):
                 ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0], device=device)),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0],
                                                                           device=device)),
-                ("nl", nn.ReLU(inplace=True)),
+                ("nl", nn.ReLU()),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1], device=device)),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1],
                                                                           device=device)),
-                ("nl", nn.ReLU(inplace=True)),
+                ("nl", nn.ReLU()),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], 1, device=device)
@@ -215,13 +215,13 @@ class Actor(nn.Module):
                 ("fc", nn.Linear(ob_dim, hid_dims[0], device=device)),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0],
                                                                           device=device)),
-                ("nl", nn.ReLU(inplace=True)),
+                ("nl", nn.ReLU()),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1], device=device)),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1],
                                                                           device=device)),
-                ("nl", nn.ReLU(inplace=True)),
+                ("nl", nn.ReLU()),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], ac_dim, device=device)
@@ -280,13 +280,13 @@ class TanhGaussActor(nn.Module):
                 ("fc", nn.Linear(ob_dim, hid_dims[0], device=device)),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0],
                                                                           device=device)),
-                ("nl", nn.ReLU(inplace=True)),
+                ("nl", nn.ReLU()),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", nn.Linear(hid_dims[0], hid_dims[1], device=device)),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1],
                                                                           device=device)),
-                ("nl", nn.ReLU(inplace=True)),
+                ("nl", nn.ReLU()),
             ]))),
         ]))
         self.head = nn.Linear(hid_dims[1], 2 * ac_dim, device=device)
