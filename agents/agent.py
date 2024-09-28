@@ -108,18 +108,18 @@ class Agent(object):
             actr_module = TanhGaussActor
         else:
             actr_module = Actor
-        self.actr = actr_module(*actr_net_args, **actr_net_kwargs).to(self.device)
+        self.actr = actr_module(*actr_net_args, **actr_net_kwargs)
         if self.hps.prefer_td3_over_sac:
             # using TD3 (SAC does not use a target actor)
-            self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
+            self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs)
             # note: could use `actr_module` equivalently, but prefer most explicit
 
         crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
         crit_net_kwargs = {"layer_norm": self.hps.layer_norm, "device": self.device}
-        self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        self.twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.crit = Critic(*crit_net_args, **crit_net_kwargs)
+        self.twin = Critic(*crit_net_args, **crit_net_kwargs)
+        self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs)
+        self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs)
 
         # initilize the target nets
         if self.hps.prefer_td3_over_sac:
