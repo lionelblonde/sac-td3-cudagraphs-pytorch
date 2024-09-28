@@ -6,6 +6,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium.core import Env
 from gymnasium.wrappers.time_limit import TimeLimit
+from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from gymnasium.vector.sync_vector_env import SyncVectorEnv
 from gymnasium.vector.async_vector_env import AsyncVectorEnv
 
@@ -77,6 +78,7 @@ def get_benchmark(env_id: str):
 def make_env(
     env_id: str,
     horizon: int,
+    seed: int,
     *,
     vectorized: bool,
     multi_proc: bool,
@@ -93,6 +95,7 @@ def make_env(
         return make_farama_mujoco_env(
             env_id,
             horizon,
+            seed,
             vectorized=vectorized,
             multi_proc=multi_proc,
             num_env=num_env,
@@ -106,6 +109,7 @@ def make_env(
 def make_farama_mujoco_env(
     env_id: str,
     horizon: int,
+    seed: int,
     *,
     vectorized: bool,
     multi_proc: bool,
@@ -121,28 +125,40 @@ def make_farama_mujoco_env(
     assert sum([render, vectorized]) <= 1, "not both same time"
     assert (not vectorized) or (num_env is not None), "must give num_envs when vectorized"
 
+    def thunk(*, render_mode: Optional[str] = None):
+        env = gym.make(env_id, render_mode=render_mode)
+        env = RecordEpisodeStatistics(env)
+        env.action_space.seed(seed)
+        return env
+
     # create env
     # normally the windowed one is "human" .other option for later: "rgb_array", but prefer:
     # the following: `from gymnasium.wrappers.pixel_observation import PixelObservationWrapper`
     if record:  # overwrites render
-        assert horizon is not None
-        env = TimeLimit(gym.make(env_id, render_mode="rgb_array_list"), max_episode_steps=horizon)
+        # assert horizon is not None
+        # env = gym.make(env_id, render_mode="rgb_array")
+        env = thunk(render_mode="rgb_array")
+        # env = TimeLimit(gym.make(env_id, render_mode="rgb_array"), max_episode_steps=horizon)
     elif render:
-        assert horizon is not None
-        env = TimeLimit(gym.make(env_id, render_mode="human"), max_episode_steps=horizon)
-        # reference: https://younis.dev/blog/render-api/
+        # assert horizon is not None
+        # env = gym.make(env_id, render_mode="human")
+        env = thunk(render_mode="human")
+        # env = TimeLimit(gym.make(env_id, render_mode="human"), max_episode_steps=horizon)
     elif vectorized:
         assert num_env is not None
-        assert horizon is not None
+        # assert horizon is not None
         env = (AsyncVectorEnv if multi_proc else SyncVectorEnv)([
-            lambda: TimeLimit(gym.make(env_id), max_episode_steps=horizon)
+            lambda: thunk()
+            # lambda: TimeLimit(gym.make(env_id), max_episode_steps=horizon)
             for _ in range(num_env)
         ])
         assert isinstance(env, (AsyncVectorEnv, SyncVectorEnv))
         logger.info("using vectorized envs")
     else:
-        assert horizon is not None
-        env = TimeLimit(gym.make(env_id), max_episode_steps=horizon)
+        # assert horizon is not None
+        # env = gym.make(env_id)
+        env = thunk()
+        # env = TimeLimit(gym.make(env_id), max_episode_steps=horizon)
 
     # build shapes for nets and replay buffer
     net_shapes = {}

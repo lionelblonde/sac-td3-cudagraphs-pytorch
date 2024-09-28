@@ -1,7 +1,6 @@
 import os
 import time
 import h5py
-from copy import deepcopy
 from pathlib import Path
 from functools import partial
 from typing import Union, Callable, ContextManager
@@ -14,8 +13,8 @@ from termcolor import colored
 import wandb
 from wandb.errors import CommError
 import numpy as np
+import torch
 
-import gymnasium as gym
 from gymnasium.core import Env
 from gymnasium.vector.vector_env import VectorEnv
 
@@ -94,12 +93,14 @@ def timed(op: str, timer: Callable[[], float]):
 def segment(env: Union[Env, VectorEnv],
             num_env: int,
             agent: Agent,
+            device: torch.device,
             seed: int,
             segment_len: int,
             learning_starts: int,
             action_repeat: int):
 
     ob, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
+    ob = torch.as_tensor(ob, device=device, dtype=torch.float)
     ac = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
 
     t = 0
@@ -114,17 +115,23 @@ def segment(env: Union[Env, VectorEnv],
             if agent.timesteps_so_far < learning_starts:
                 ac = env.action_space.sample()
             else:
-                assert isinstance(ob, np.ndarray)
+                assert isinstance(ob, torch.Tensor)
                 ac = agent.predict(ob, explore=True)
 
         if t > 0 and t % segment_len == 0:
             yield
 
         # interact with env
-        new_ob, rew, terminated, truncated, info = env.step(ac)
+        new_ob, rew, terminated, truncated, infos = env.step(ac)
+
+        ac = torch.as_tensor(ac, device=device, dtype=torch.float)
+
+        new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
+
         if num_env == 1:
             rew = np.array([rew])
         rew = rearrange(rew, "b -> b 1")
+        rew = torch.as_tensor(rew, device=device, dtype=torch.float)
 
         if num_env > 1:
             logger.debug(f"{terminated=} | {truncated=}")
@@ -148,7 +155,7 @@ def segment(env: Union[Env, VectorEnv],
         # note: we use terminated as a done replacement, but keep the key "dones1"
 
         if num_env > 1:
-            pp_func = partial(postproc_vtr, num_env, info)
+            pp_func = partial(postproc_vtr, num_env, device, infos)
         else:
             assert isinstance(env, Env)
             pp_func = postproc_tr
@@ -161,7 +168,7 @@ def segment(env: Union[Env, VectorEnv],
             logger.debug(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
 
         # set current state with the next
-        ob = deepcopy(new_ob)
+        ob = new_ob
 
         if num_env == 1:
             assert isinstance(env, Env)
@@ -174,26 +181,30 @@ def segment(env: Union[Env, VectorEnv],
 
 @beartype
 def postproc_vtr(num_envs: int,
-                 info: dict[str, np.ndarray],
-                 vtr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
+                 device: torch.device,
+                 infos: dict[str, np.ndarray],
+                 vtr: list[Union[np.ndarray, torch.Tensor]],
+    ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
     # N.B.: for the num of envs and the workloads, serial treatment is faster than parallel
     # time it takes for the main process to spawn X threads is too much overhead
     # it starts becoming interesting if the post-processing is heavier though
     outs = []
     for i in range(num_envs):
         tr = [e[i] for e in vtr]
-        if "final_observation" in info:
-            if bool(info["_final_observation"][i]):
+        if "final_observation" in infos:
+            if bool(infos["_final_observation"][i]):
                 ob, ac, _, rew, terminated = tr
                 logger.debug("writing over new_ob with info[final_observation]")
-                tr = [
-                    ob, ac, info["final_observation"][i], rew, terminated]  # override `new_ob`
+                real_new_ob = torch.as_tensor(
+                    infos["final_observation"][i], device=device, dtype=torch.float)
+                tr = [ob, ac, real_new_ob, rew, terminated]  # override `new_ob`
         outs.extend(postproc_tr(tr))
     return outs
 
 
 @beartype
-def postproc_tr(tr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
+def postproc_tr(tr: list[Union[np.ndarray, torch.Tensor]],
+    ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
     ob, ac, new_ob, rew, terminated = tr
     return [
         {"obs0": ob,
@@ -206,6 +217,7 @@ def postproc_tr(tr: list[np.ndarray]) -> list[dict[str, np.ndarray]]:
 @beartype
 def episode(env: Env,
             agent: Agent,
+            device: torch.device,
             seed: int):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
@@ -217,35 +229,46 @@ def episode(env: Env,
         return seed + rng.integers(2**32 - 1, size=1).item()
         # seeded Generator: deterministic -> reproducible
 
-    ob, _ = env.reset(seed=randomize_seed())
-
-    ep_len = 0
-    ep_ret = 0
     obs0 = []
     acs0 = []
     obs1 = []
     erews1 = []
     dones1 = []
+    ep_len = 0
+    ep_ret = 0
+    ep_tim = 0
+
+    ob, _ = env.reset(seed=randomize_seed())
+    obs0.append(ob)
+    ob = torch.as_tensor(ob, device=device, dtype=torch.float)
 
     while True:
 
         # predict action
+        assert isinstance(ob, torch.Tensor)
         ac = agent.predict(ob, explore=False)
 
-        obs0.append(ob)
         acs0.append(ac)
-        new_ob, erew, terminated, truncated, _ = env.step(ac)
+        new_ob, erew, terminated, truncated, infos = env.step(ac)
+
         done = terminated or truncated
         dones1.append(done)
         erews1.append(erew)
-        ep_len += 1
-        assert isinstance(erew, float)  # quiets the type-checker
-        ep_ret += erew
-        ob = deepcopy(new_ob)
 
-        if done:
-            ep_len = np.int64(ep_len)  # applying the conversion: int -> np.int64
-            ep_ret = np.float64(ep_ret)  # already is a np.float64, but wrapping anyway
+        obs1.append(new_ob)
+        if not done:
+            obs0.append(new_ob)
+
+        new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
+        ob = new_ob
+
+        if "final_info" in infos:
+            assert len(infos["final_info"]) == 1
+            for info in infos["final_info"]:
+                ep_len = np.int64(info["episode"]["l"])
+                ep_ret = np.float64(info["episode"]["r"])
+                ep_tim = np.float64(info["episode"]["t"])
+
             obs0 = np.array(obs0)
             acs0 = np.array(acs0)
             obs1 = np.array(obs1)
@@ -259,11 +282,10 @@ def episode(env: Env,
                 "dones1": dones1,
                 "ep_len": ep_len,
                 "ep_ret": ep_ret,
+                "ep_tim": ep_tim,
             }
             yield out
 
-            ep_len = 0
-            ep_ret = 0
             obs0 = []
             acs0 = []
             obs1 = []
@@ -271,6 +293,8 @@ def episode(env: Env,
             dones1 = []
 
             ob, _ = env.reset(seed=randomize_seed())
+            obs0.append(ob)
+            ob = torch.as_tensor(ob, device=device, dtype=torch.float)
 
 
 @beartype
@@ -279,7 +303,8 @@ def train(cfg: DictConfig,
           eval_env: Env,
           agent_wrapper: Callable[[], Agent],
           timer_wrapper: Callable[[], Callable[[], float]],
-          name: str):
+          name: str,
+          device: torch.device):
 
     assert isinstance(cfg, DictConfig)
 
@@ -330,10 +355,23 @@ def train(cfg: DictConfig,
 
     # create segment generator for training the agent
     roll_gen = segment(
-        env, cfg.num_env, agent, cfg.seed, cfg.segment_len, cfg.learning_starts, cfg.action_repeat)
+        env,
+        cfg.num_env,
+        agent,
+        device,
+        cfg.seed,
+        cfg.segment_len,
+        cfg.learning_starts,
+        cfg.action_repeat,
+    )
     # create episode generator for evaluating the agent
     eval_seed = cfg.seed + 123456  # arbitrary choice
-    ep_gen = episode(eval_env, agent, eval_seed)
+    ep_gen = episode(
+        eval_env,
+        agent,
+        device,
+        eval_seed,
+    )
 
     i = 0
 
@@ -444,7 +482,8 @@ def train(cfg: DictConfig,
 def evaluate(cfg: DictConfig,
              env: Env,
              agent_wrapper: Callable[[], Agent],
-             name: str):
+             name: str,
+             device: torch.device):
 
     assert isinstance(cfg, DictConfig)
 
@@ -460,7 +499,12 @@ def evaluate(cfg: DictConfig,
     agent = agent_wrapper()
 
     # create episode generator
-    ep_gen = episode(env, agent, cfg.seed)
+    ep_gen = episode(
+        env,
+        agent,
+        device,
+        cfg.seed,
+    )
 
     # load the model
     agent.load(cfg.load_ckpt)

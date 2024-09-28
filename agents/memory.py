@@ -1,3 +1,5 @@
+from typing import Union
+
 from beartype import beartype
 from einops import repeat, pack, rearrange
 import numpy as np
@@ -125,13 +127,17 @@ class ReplayBuffer(object):
         return self.get_trns(idxs)
 
     @beartype
-    def append(self, trn: dict[str, np.ndarray]):
+    def append(self, trn: dict[str, Union[np.ndarray, torch.Tensor]]):
         """Add a transition to the replay buffer."""
         assert set(self.ring_buffers.keys()) == set(trn.keys()), "key mismatch"
         for k in self.ring_buffers:
-            if not isinstance(trn[k], np.ndarray):
+            if not isinstance(trn[k], (np.ndarray, torch.Tensor)):
                 raise TypeError(k)
-            new_tensor = torch.as_tensor(trn[k], device=self.device, dtype=torch.float)
+            if isinstance(trn[k], np.ndarray):
+                new_tensor = torch.as_tensor(trn[k], device=self.device, dtype=torch.float)
+            else:
+                new_tensor = trn[k]
+            assert isinstance(new_tensor, torch.Tensor)
             self.ring_buffers[k].append(v=new_tensor)
 
     @beartype

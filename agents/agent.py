@@ -158,22 +158,17 @@ class Agent(object):
         return out
 
     @beartype
-    def predict(self, ob: np.ndarray, *, explore: bool) -> np.ndarray:
+    def predict(self, ob: torch.Tensor, *, explore: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
-        ob_tensor = torch.as_tensor(ob, device=self.device, dtype=torch.float)
         if self.hps.prefer_td3_over_sac:
             with torch.no_grad():
                 # using TD3
-                ac_tensor = (self.actr(ob_tensor)
-                             if explore
-                             else self.actr.explore(ob_tensor))
+                ac = self.actr(ob) if explore else self.actr.explore(ob)
         else:
             # using SAC
             # actions from sample and mode are detached by default
-            ac_tensor = (self.actr.sample(ob_tensor)
-                         if explore
-                         else self.actr.mode(ob_tensor))
-        return ac_tensor.clamp(self.min_ac, self.max_ac).cpu().numpy()
+            ac = (self.actr.sample(ob) if explore else self.actr.mode(ob))
+        return ac.clamp(self.min_ac, self.max_ac).cpu().numpy()
 
     @beartype
     def compute_losses(self,

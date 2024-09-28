@@ -160,6 +160,7 @@ class MagicRunner(object):
         env, net_shapes, erb_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.horizon,
+            self._cfg.seed,
             vectorized=self._cfg.vectorized,
             multi_proc=self._cfg.multi_proc,
             num_env=self._cfg.num_env,
@@ -205,9 +206,11 @@ class MagicRunner(object):
         # create an evaluation environment not to mess up with training rollouts
         eval_env, _, _, _, _ = make_env(
             self._cfg.env_id,
-            horizon=1000,
-            vectorized=False,
+            self._cfg.horizon,
+            self._cfg.seed,
+            vectorized=True,
             multi_proc=False,
+            num_env=1,
             record=self._cfg.record,
             render=self._cfg.render,
         )
@@ -221,6 +224,7 @@ class MagicRunner(object):
             agent_wrapper=agent_wrapper,
             timer_wrapper=timer_wrapper,
             name=self.name,
+            device=device,
         )
 
         # cleanup
@@ -247,13 +251,14 @@ class MagicRunner(object):
         device = self.setup_device()
 
         # seed
+        random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
         torch.manual_seed(self._cfg.seed)
-        torch.cuda.manual_seed_all(self._cfg.seed)
 
         # env
         env, net_shapes, _, min_ac, max_ac = make_env(
             self._cfg.env_id,
-            horizon=1000,
+            self._cfg.horizon,
+            self._cfg.seed,
             vectorized=False,
             multi_proc=False,
             record=self._cfg.record,
@@ -279,6 +284,7 @@ class MagicRunner(object):
             env=env,
             agent_wrapper=agent_wrapper,
             name=self.name,
+            device=device,
         )
 
         # cleanup
