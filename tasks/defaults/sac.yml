@@ -17,9 +17,8 @@ measure_burnin: 3
 num_timesteps: 10000000
 learning_starts: 5000
 training_steps_per_iter: 1
-eval_steps_per_iter: 10
-# eval_every: 10000
-eval_every: 100
+eval_steps: 10
+eval_every: 2000
 
 # evaluation mode
 num_episodes: 10
