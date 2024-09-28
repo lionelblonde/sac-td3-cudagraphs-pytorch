@@ -118,7 +118,7 @@ def segment(env: Union[Env, VectorEnv],
                 ac = env.action_space.sample()
             else:
                 assert isinstance(ob, np.ndarray)
-                ac = agent.predict(ob, apply_noise=True)
+                ac = agent.predict(ob, explore=True)
                 # nan-proof and clip
                 ac = np.nan_to_num(ac)
                 ac = np.clip(ac, ac_low, ac_high)
@@ -239,7 +239,7 @@ def episode(env: Env,
     while True:
 
         # predict action
-        ac = agent.predict(ob, apply_noise=False)
+        ac = agent.predict(ob, explore=False)
         # nan-proof and clip
         ac = np.nan_to_num(ac)
         ac = np.clip(ac, ac_low, ac_high)

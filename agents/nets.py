@@ -109,28 +109,37 @@ class TanhNormalToolkit(object):
              mean: torch.Tensor,
              std: torch.Tensor,
              *,
-             x_scale: float) -> torch.Tensor:
+             scale: torch.Tensor) -> torch.Tensor:
         # we need to assemble the logp of a sample which comes from a Gaussian sample
         # after being mapped through a tanh. This needs a change of variable.
         # See appendix C of the SAC paper for an explanation of this change of variable.
-        x_ = arctanh(x / x_scale)
+        x_ = arctanh(x / scale)
         logp1 = NormalToolkit.logp(x_, mean, std)
         logp2 = 2. * (math.log(2.) - x_ - ff.softplus(-2. * x_))
         logp2 = logp2.sum(dim=-1, keepdim=True)
-        # trick for numerical stability from:
-        # https://github.com/tensorflow/probability/commit/ef6bb176e0ebd1cf6e25c6b5cecdd2428c22963f#diff-e120f70e92e6741bca649f04fcd907b7
         return logp1 - logp2
 
     @beartype
     @staticmethod
-    def sample(mean: torch.Tensor, std: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
+    def sample(mean: torch.Tensor,
+               std: torch.Tensor,
+               *,
+               generator: torch.Generator,
+               scale: torch.Tensor,
+               bias: torch.Tensor,
+    ) -> torch.Tensor:
         sample = NormalToolkit.sample(mean, std, generator)
-        return torch.tanh(sample)
+        sample = torch.tanh(sample)
+        return sample * scale + bias
 
     @beartype
     @staticmethod
-    def mode(mean: torch.Tensor) -> torch.Tensor:
-        return torch.tanh(mean)
+    def mode(mean: torch.Tensor,
+             *,
+             scale: torch.Tensor,
+             bias: torch.Tensor,
+    ) -> torch.Tensor:
+        return torch.tanh(mean) * scale + bias
 
 
 class Critic(nn.Module):
@@ -188,15 +197,16 @@ class Actor(nn.Module):
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
                  rms_obs: Optional[RunningMoments],
-                 max_ac: float,
+                 min_ac: torch.Tensor,
+                 max_ac: torch.Tensor,
                  *,
+                 exploration_noise: float,
                  layer_norm: bool,
                  device: Optional[torch.device] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
-        self.ac_dim = ac_shape[-1]  # used in child class
+        ac_dim = ac_shape[-1]
         self.rms_obs = rms_obs
-        self.max_ac = max_ac
         self.layer_norm = layer_norm
 
         # assemble the last layers and output heads
@@ -214,21 +224,36 @@ class Actor(nn.Module):
                 ("nl", nn.ReLU(inplace=True)),
             ]))),
         ]))
-        self.head = nn.Linear(hid_dims[1], self.ac_dim, device=device)
+        self.head = nn.Linear(hid_dims[1], ac_dim, device=device)
 
         # perform initialization
         self.fc_stack.apply(init())
         self.head.apply(init())
 
+        # register buffers: action rescaling
+        self.register_buffer("action_scale",
+            (max_ac - min_ac) / 2.0)
+        self.register_buffer("action_bias",
+            (max_ac + min_ac) / 2.0)
+        # register buffers: exploration
+        self.register_buffer("exploration_noise",
+            torch.as_tensor(exploration_noise, device=device))
+
     @beartype
-    def act(self, ob: torch.Tensor) -> torch.Tensor:
+    def forward(self, ob: torch.Tensor) -> torch.Tensor:
         if self.rms_obs is not None:
             ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)
-        return float(self.max_ac) * torch.tanh(self.head(x))
+        x = self.head(x)
+        return torch.tanh(x) * self.action_scale + self.action_bias
+
+    @beartype
+    def explore(self, ob: torch.Tensor) -> torch.Tensor:
+        ac = self(ob)
+        return ac + torch.randn_like(ac).mul(self.action_scale * self.exploration_noise)
 
 
-class TanhGaussActor(Actor):
+class TanhGaussActor(nn.Module):
 
     @beartype
     def __init__(self,
@@ -236,41 +261,67 @@ class TanhGaussActor(Actor):
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
                  rms_obs: Optional[RunningMoments],
-                 max_ac: float,
+                 min_ac: torch.Tensor,
+                 max_ac: torch.Tensor,
                  *,
                  generator: torch.Generator,
                  layer_norm: bool,
                  device: Optional[torch.device] = None):
-        super().__init__(ob_shape,
-                         ac_shape,
-                         hid_dims,
-                         rms_obs,
-                         max_ac,
-                         layer_norm=layer_norm,
-                         device=device)
+        super().__init__()
+        ob_dim = ob_shape[-1]
+        ac_dim = ac_shape[-1]
+        self.rms_obs = rms_obs
         self.rng = generator
-        # overwrite head
-        self.head = nn.Linear(hid_dims[1], 2 * self.ac_dim, device=device)
-        # perform initialization (since head written over)
+        self.layer_norm = layer_norm
+
+        # assemble the last layers and output heads
+        self.fc_stack = nn.Sequential(OrderedDict([
+            ("fc_block_1", nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(ob_dim, hid_dims[0], device=device)),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0],
+                                                                          device=device)),
+                ("nl", nn.ReLU(inplace=True)),
+            ]))),
+            ("fc_block_2", nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(hid_dims[0], hid_dims[1], device=device)),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1],
+                                                                          device=device)),
+                ("nl", nn.ReLU(inplace=True)),
+            ]))),
+        ]))
+        self.head = nn.Linear(hid_dims[1], 2 * ac_dim, device=device)
+
+        # perform initialization
+        self.fc_stack.apply(init())
         self.head.apply(init())
-        # no need to init the Parameter type object
+
+        # register buffers: action rescaling
+        self.register_buffer("action_scale",
+            (max_ac - min_ac) / 2.0)
+        self.register_buffer("action_bias",
+            (max_ac + min_ac) / 2.0)
 
     @beartype
-    def logp(self, ob: torch.Tensor, ac: torch.Tensor, max_ac: float) -> torch.Tensor:
-        out = self.mean_std(ob)
-        return TanhNormalToolkit.logp(ac, *out, x_scale=max_ac)  # mean, std
+    def logp(self, ob: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
+        out = self(ob)
+        return TanhNormalToolkit.logp(ac, *out, scale=self.action_scale)  # mean, std
 
     @beartype
     def sample(self, ob: torch.Tensor, *, stop_grad: bool = True) -> torch.Tensor:
         with torch.no_grad() if stop_grad else nullcontext():
-            out = self.mean_std(ob)
-            return float(self.max_ac) * TanhNormalToolkit.sample(*out, generator=self.rng)
+            out = self(ob)
+            return TanhNormalToolkit.sample(*out,
+                                            generator=self.rng,
+                                            scale=self.action_scale,
+                                            bias=self.action_bias)
 
     @beartype
     def mode(self, ob: torch.Tensor, *, stop_grad: bool = True) -> torch.Tensor:
         with torch.no_grad() if stop_grad else nullcontext():
-            mean, _ = self.mean_std(ob)
-            return float(self.max_ac) * TanhNormalToolkit.mode(mean)
+            mean, _ = self(ob)
+            return TanhNormalToolkit.mode(mean,
+                                          scale=self.action_scale,
+                                          bias=self.action_bias)
 
     @beartype
     @staticmethod
@@ -281,7 +332,7 @@ class TanhGaussActor(Actor):
         return log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)
 
     @beartype
-    def mean_std(self, ob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, ob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if self.rms_obs is not None:
             ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)

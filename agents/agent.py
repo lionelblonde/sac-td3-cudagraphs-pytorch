@@ -21,27 +21,6 @@ from agents.nets import log_module_info, Actor, TanhGaussActor, Critic
 from agents.memory import ReplayBuffer
 
 
-class NormalActionNoise(object):
-
-    @beartype
-    def __init__(self, mu: torch.Tensor, sigma: torch.Tensor, generator: torch.Generator):
-        """Additive action space Gaussian noise"""
-        assert isinstance(mu, torch.Tensor) and isinstance(sigma, torch.Tensor)
-        self.mu = mu
-        self.sigma = sigma
-        self.device = self.mu.device  # grab the device we are on (assumed sigma and mu on same)
-        self.rng = generator
-
-    @beartype
-    def generate(self):
-        noise = torch.randn(self.mu.size(), generator=self.rng, device=self.device)
-        return self.mu + (noise * self.sigma)
-
-    @beartype
-    def __repr__(self):
-        return f"NormalAcNoise(mu={self.mu}, sigma={self.sigma})"
-
-
 class Agent(object):
 
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
@@ -49,16 +28,18 @@ class Agent(object):
     @beartype
     def __init__(self,
                  net_shapes: dict[str, tuple[int, ...]],
-                 max_ac: float,
+                 min_ac: np.ndarray,
+                 max_ac: np.ndarray,
                  device: torch.device,
                  hps: DictConfig,
                  actr_noise_rng: torch.Generator,
                  replay_buffers: Optional[list[ReplayBuffer]]):
         self.ob_shape, self.ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
-        # the self here needed because those shapes are used in the orchestrator
-        self.max_ac = max_ac
 
         self.device = device
+
+        self.min_ac = torch.tensor(min_ac, dtype=torch.float32, device=self.device)
+        self.max_ac = torch.tensor(max_ac, dtype=torch.float32, device=self.device)
 
         assert isinstance(hps, DictConfig)
         self.hps = hps
@@ -82,18 +63,6 @@ class Agent(object):
         # replay buffer
         self.replay_buffers = replay_buffers
 
-        # setup action noise
-        self.ac_noise = None
-        if self.hps.prefer_td3_over_sac:
-            self.ac_noise = NormalActionNoise(
-                mu=torch.zeros(self.ac_shape,
-                               device=self.device),
-                sigma=float(self.hps.normal_noise_std) * torch.ones(self.ac_shape,
-                                                                    device=self.device),
-                generator=actr_noise_rng,
-            )  # spherical/isotropic additive Normal(0., 0.1) action noise (we set the std via cfg)
-            logger.debug(f"{self.ac_noise} configured")
-
         self.rms_obs = None
         if self.hps.batch_norm:
             # create observation normalizer that maintains running statistics
@@ -101,15 +70,19 @@ class Agent(object):
 
         # create online and target nets
 
-        actr_hid_dims = (256, 256)
-        crit_hid_dims = (256, 256)
-
-        actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
-        actr_net_kwargs = {"layer_norm": self.hps.layer_norm, "device": self.device}
+        actr_net_args = [self.ob_shape,
+                         self.ac_shape,
+                         (256, 256),
+                         self.rms_obs,
+                         self.min_ac,
+                         self.max_ac]
+        actr_net_kwargs = {"layer_norm": self.hps.layer_norm,
+                           "device": self.device}
         if not self.hps.prefer_td3_over_sac:
             actr_net_kwargs.update({"generator": actr_noise_rng})
             actr_module = TanhGaussActor
         else:
+            actr_net_kwargs.update({"exploration_noise": self.hps.actr_noise_std})
             actr_module = Actor
         self.actr = actr_module(*actr_net_args, **actr_net_kwargs)
         if self.hps.prefer_td3_over_sac:
@@ -117,8 +90,12 @@ class Agent(object):
             self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs)
             # note: could use `actr_module` equivalently, but prefer most explicit
 
-        crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
-        crit_net_kwargs = {"layer_norm": self.hps.layer_norm, "device": self.device}
+        crit_net_args = [self.ob_shape,
+                         self.ac_shape,
+                         (256, 256),
+                         self.rms_obs]
+        crit_net_kwargs = {"layer_norm": self.hps.layer_norm,
+                           "device": self.device}
         self.crit = Critic(*crit_net_args, **crit_net_kwargs)
         self.twin = Critic(*crit_net_args, **crit_net_kwargs)
         self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs)
@@ -181,36 +158,20 @@ class Agent(object):
         return out
 
     @beartype
-    def predict(self, ob: np.ndarray, *, apply_noise: bool) -> np.ndarray:
+    def predict(self, ob: np.ndarray, *, explore: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
         ob_tensor = torch.as_tensor(ob, device=self.device, dtype=torch.float)
-
-        if self.ac_noise is not None:
+        if self.hps.prefer_td3_over_sac:
             # using TD3
-            assert self.hps.prefer_td3_over_sac
-
-            # predict an action using the policy
-            ac_tensor = self.actr.act(ob_tensor)
-            # if desired, add noise to the predicted action
-            if apply_noise:
-                # apply additive action noise once the action has been predicted,
-                # in combination with parameter noise, or not.
-                ac_tensor += self.ac_noise.generate()
+            ac_tensor = (self.actr(ob_tensor)
+                         if explore
+                         else self.actr.explore(ob_tensor))
         else:
             # using SAC
-            assert not self.hps.prefer_td3_over_sac
-            if apply_noise:
-                ac_tensor = self.actr.sample(
-                    ob_tensor, stop_grad=True)
-            else:
-                ac_tensor = self.actr.mode(
-                    ob_tensor, stop_grad=True)
-
-        # place on cpu as a numpy array
-        ac = ac_tensor.numpy(force=True)
-        # clip the action to fit within the range from the environment
-        ac.clip(-self.max_ac, self.max_ac)
-        return ac
+            ac_tensor = (self.actr.sample(ob_tensor)
+                         if explore
+                         else self.actr.mode(ob_tensor))
+        return ac_tensor.clamp(self.min_ac, self.max_ac).detach().cpu().numpy()
 
     @beartype
     def compute_losses(self,
@@ -228,12 +189,12 @@ class Agent(object):
 
         if self.hps.prefer_td3_over_sac:
             # using TD3
-            action_from_actr = self.actr.act(state)
+            action_from_actr = self.actr(state)
             log_prob = None  # quiets down the type checker
         else:
             # using SAC
             action_from_actr = self.actr.sample(state, stop_grad=False)
-            log_prob = self.actr.logp(state, action_from_actr, self.max_ac)
+            log_prob = self.actr.logp(state, action_from_actr)
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -267,7 +228,7 @@ class Agent(object):
         if not self.hps.prefer_td3_over_sac:  # only for SAC
             assert self.alpha is not None
             # add the causal entropy regularization term
-            next_log_prob = self.actr.logp(next_state, next_action, self.max_ac)
+            next_log_prob = self.actr.logp(next_state, next_action)
             q_prime -= self.alpha.detach() * next_log_prob
 
         # assemble the Bellman target
@@ -326,9 +287,9 @@ class Agent(object):
                 assert n_.device == self.device
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
                 next_action = (
-                    self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
+                    self.targ_actr(next_state) + n_).clamp(self.min_ac, self.max_ac)
             else:
-                next_action = self.targ_actr.act(next_state)
+                next_action = self.targ_actr(next_state)
         else:
             # using SAC
             next_action = self.actr.sample(next_state, stop_grad=True)

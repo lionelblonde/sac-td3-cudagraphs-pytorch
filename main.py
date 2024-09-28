@@ -157,7 +157,7 @@ class MagicRunner(object):
         torch.manual_seed(self._cfg.seed)
 
         # env
-        env, net_shapes, erb_shapes, max_ac = make_env(
+        env, net_shapes, erb_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.horizon,
             vectorized=self._cfg.vectorized,
@@ -185,6 +185,7 @@ class MagicRunner(object):
         def agent_wrapper() -> Agent:
             return Agent(
                 net_shapes=net_shapes,
+                min_ac=min_ac,
                 max_ac=max_ac,
                 device=device,
                 hps=self._cfg,
@@ -202,7 +203,7 @@ class MagicRunner(object):
             return _timer
 
         # create an evaluation environment not to mess up with training rollouts
-        eval_env, _, _, _ = make_env(
+        eval_env, _, _, _, _ = make_env(
             self._cfg.env_id,
             horizon=1000,
             vectorized=False,
@@ -250,7 +251,7 @@ class MagicRunner(object):
         torch.cuda.manual_seed_all(self._cfg.seed)
 
         # env
-        env, net_shapes, _, max_ac = make_env(
+        env, net_shapes, _, min_ac, max_ac = make_env(
             self._cfg.env_id,
             horizon=1000,
             vectorized=False,
@@ -264,6 +265,7 @@ class MagicRunner(object):
         def agent_wrapper() -> Agent:
             return Agent(
                 net_shapes=net_shapes,
+                min_ac=min_ac,
                 max_ac=max_ac,
                 device=device,
                 hps=self._cfg,

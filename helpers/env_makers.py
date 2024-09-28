@@ -1,7 +1,7 @@
 from typing import Union, Optional
 
-import numpy as np
 from beartype import beartype
+import numpy as np
 
 import gymnasium as gym
 from gymnasium.core import Env
@@ -84,7 +84,7 @@ def make_env(
     record: bool,
     render: bool,
     ) -> tuple[Union[Env, AsyncVectorEnv],
-    dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], float]:
+    dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], np.ndarray, np.ndarray]:
 
     # create an environment
     bench = get_benchmark(env_id)  # at this point benchmark is valid
@@ -113,7 +113,7 @@ def make_farama_mujoco_env(
     record: bool,
     render: bool,
     ) -> tuple[Union[Env, AsyncVectorEnv],
-    dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], float]:
+    dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], np.ndarray, np.ndarray]:
 
     # not ideal for code golf, but clearer for debug
 
@@ -148,7 +148,6 @@ def make_farama_mujoco_env(
     net_shapes = {}
     erb_shapes = {}
 
-    # for the nets
     ob_space = env.observation_space
     assert isinstance(ob_space, gym.spaces.Box)  # for due diligence
     ob_shape = ob_space.shape
@@ -161,7 +160,6 @@ def make_farama_mujoco_env(
     assert ac_shape is not None
     net_shapes.update({"ob_shape": ob_shape, "ac_shape": ac_shape})
 
-    # for the replay buffer
     erb_shapes.update({
         "obs0": (ob_shape[-1],),
         "acs0": (ac_shape[-1],),
@@ -169,13 +167,7 @@ def make_farama_mujoco_env(
         "erews1": (1,),
         "dones1": (1,),
     })
-
-    # max value for action
-    max_ac = max(
-        np.abs(np.amax(ac_space.high.astype("float32"))),
-        np.abs(np.amin(ac_space.low.astype("float32"))),
-    ).item()  # return it not as an ndarray but a standard Python scalar
-    # despite the fact that we use the max, the actions are clipped with min and max
-    # during interaction in the orchestrator
-
-    return env, net_shapes, erb_shapes, max_ac
+    min_ac, max_ac = ac_space.low, ac_space.high
+    if vectorized:  # all envs have the same ac bounds
+        min_ac, max_ac = ac_space.low[0], ac_space.high[0]
+    return env, net_shapes, erb_shapes, min_ac, max_ac
