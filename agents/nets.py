@@ -143,7 +143,7 @@ class Critic(nn.Module):
                  rms_obs: Optional[RunningMoments],
                  *,
                  layer_norm: bool,
-                 use_mish_over_relu: bool):
+                 device: Optional[torch.device] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
@@ -153,17 +153,19 @@ class Critic(nn.Module):
         # assemble the last layers and output heads
         self.fc_stack = nn.Sequential(OrderedDict([
             ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
+                ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0], device=device)),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0],
+                                                                          device=device)),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
+                ("fc", nn.Linear(hid_dims[0], hid_dims[1], device=device)),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1],
+                                                                          device=device)),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
         ]))
-        self.head = nn.Linear(hid_dims[1], 1)
+        self.head = nn.Linear(hid_dims[1], 1, device=device)
 
         # perform initialization
         self.fc_stack.apply(init())
@@ -189,7 +191,7 @@ class Actor(nn.Module):
                  max_ac: float,
                  *,
                  layer_norm: bool,
-                 use_mish_over_relu: bool):
+                 device: Optional[torch.device] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
         self.ac_dim = ac_shape[-1]  # used in child class
@@ -200,17 +202,19 @@ class Actor(nn.Module):
         # assemble the last layers and output heads
         self.fc_stack = nn.Sequential(OrderedDict([
             ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(ob_dim, hid_dims[0])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
+                ("fc", nn.Linear(ob_dim, hid_dims[0], device=device)),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0],
+                                                                          device=device)),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.Mish() if use_mish_over_relu else nn.ReLU(inplace=True)),
+                ("fc", nn.Linear(hid_dims[0], hid_dims[1], device=device)),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1],
+                                                                          device=device)),
+                ("nl", nn.ReLU(inplace=True)),
             ]))),
         ]))
-        self.head = nn.Linear(hid_dims[1], self.ac_dim)
+        self.head = nn.Linear(hid_dims[1], self.ac_dim, device=device)
 
         # perform initialization
         self.fc_stack.apply(init())
@@ -235,24 +239,18 @@ class TanhGaussActor(Actor):
                  max_ac: float,
                  *,
                  generator: torch.Generator,
-                 state_dependent_std: bool,
                  layer_norm: bool,
-                 use_mish_over_relu: bool):
+                 device: Optional[torch.device] = None):
         super().__init__(ob_shape,
                          ac_shape,
                          hid_dims,
                          rms_obs,
                          max_ac,
                          layer_norm=layer_norm,
-                         use_mish_over_relu=use_mish_over_relu)
+                         device=device)
         self.rng = generator
-        self.state_dependent_std = state_dependent_std
         # overwrite head
-        if self.state_dependent_std:
-            self.head = nn.Linear(hid_dims[1], 2 * self.ac_dim)
-        else:
-            self.head = nn.Linear(hid_dims[1], self.ac_dim)
-            self.ac_logstd_head = nn.Parameter(torch.full((self.ac_dim,), math.log(0.6)))
+        self.head = nn.Linear(hid_dims[1], 2 * self.ac_dim, device=device)
         # perform initialization (since head written over)
         self.head.apply(init())
         # no need to init the Parameter type object
@@ -277,6 +275,7 @@ class TanhGaussActor(Actor):
     @beartype
     @staticmethod
     def bound_log_std(log_std: torch.Tensor) -> torch.Tensor:
+        """Stability trick from OpenAI SpinUp / Denis Yarats"""
         log_std = torch.tanh(log_std)
         log_std_min, log_std_max = SAC_LOG_STD_BOUNDS
         return log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)
@@ -286,11 +285,7 @@ class TanhGaussActor(Actor):
         if self.rms_obs is not None:
             ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)
-        if self.state_dependent_std:
-            ac_mean, ac_log_std = self.head(x).chunk(2, dim=-1)
-        else:
-            ac_mean = self.head(x)
-            ac_log_std = self.ac_logstd_head.expand_as(ac_mean)
+        ac_mean, ac_log_std = self.head(x).chunk(2, dim=-1)
         ac_log_std = self.bound_log_std(ac_log_std)
         ac_std = ac_log_std.exp()
         return ac_mean, ac_std

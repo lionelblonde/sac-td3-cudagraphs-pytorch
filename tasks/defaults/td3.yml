@@ -40,7 +40,6 @@ batch_size: 256
 gamma: 0.99
 rbx_capacity: 1000000
 polyak: 0.005
-use_mish_over_relu: false
 prefer_td3_over_sac: true
 bcq_style_targ_mix: true
 actr_update_delay: true
