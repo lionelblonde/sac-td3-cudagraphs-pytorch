@@ -17,7 +17,8 @@ num_timesteps: 10000000
 learning_starts: 25000
 training_steps_per_iter: 1
 eval_steps_per_iter: 10
-eval_every: 10000
+# eval_every: 10000
+eval_every: 100
 
 # evaluation mode
 num_episodes: 10
@@ -43,7 +44,7 @@ polyak: 0.005
 prefer_td3_over_sac: true
 bcq_style_targ_mix: true
 actr_update_delay: true
-normal_noise_std: 0.1
+actr_noise_std: 0.1
 targ_actor_smoothing: true
 td3_std: 0.2
 td3_c: 0.5
