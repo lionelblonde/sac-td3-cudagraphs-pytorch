@@ -11,6 +11,7 @@ action_repeat: 1
 
 # logging
 wandb_project: "calico"
+measure_burnin: 3
 
 # training mode
 num_timesteps: 10000000

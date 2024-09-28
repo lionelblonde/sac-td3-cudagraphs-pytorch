@@ -359,15 +359,21 @@ def train(cfg: DictConfig,
     )
 
     i = 0
+    start_time = None
+    measure_burnin = None
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
         if i % cfg.eval_every == 0:
             logger.warn((f"iter#{i}").upper())
 
+        if agent.timesteps_so_far == (cfg.measure_burnin + cfg.learning_starts):
+            start_time = time.time()
+            measure_burnin = agent.timesteps_so_far
+
         logger.info(("interact").upper())
-        next(roll_gen)  # no need to get the returned segment, stored in buffer
-        agent.timesteps_so_far += (cfg.segment_len * cfg.num_env)
+        next(roll_gen)
+        agent.timesteps_so_far += cfg.segment_len
         logger.info(f"so far {prettify_numb(agent.timesteps_so_far)} steps made")
 
         if agent.timesteps_so_far <= cfg.learning_starts:
@@ -387,7 +393,11 @@ def train(cfg: DictConfig,
             # update the actor and critic
             agent.update_actr_crit(trns_batch, update_actr=update_actr)
 
-        if i % cfg.eval_every == 0:
+        if (i % cfg.eval_every == 0) and start_time is not None:
+
+            assert measure_burnin is not None
+            # compute the speed in steps per second
+            speed = (agent.timesteps_so_far - measure_burnin) / (time.time() - start_time)
 
             logger.info(("eval").upper())
             len_buff, ret_buff = [], []
@@ -419,11 +429,17 @@ def train(cfg: DictConfig,
 
             # log with wandb
             assert agent.replay_buffers is not None
-            wandb_dict = {
+            log = {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
                 "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
             }
-            wandb.log(wandb_dict, step=agent.timesteps_so_far)
+            wandb.log(
+                {
+                    **log,
+                    "vitals/speed": speed,
+                },
+                step=agent.timesteps_so_far,
+            )
 
         i += 1
 
