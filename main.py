@@ -1,8 +1,7 @@
 import os
-import time
 import subprocess
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 
 from beartype import beartype
 import fire
@@ -56,7 +55,6 @@ class MagicRunner(object):
 
     DISABLE_LOGGER: bool = False
     LOGGER_LEVEL: int = logger.WARN
-    PRODUCTION_MODE: bool = True
 
     @beartype
     def __init__(self, cfg: str,  # give the relative path to cfg here
@@ -194,15 +192,6 @@ class MagicRunner(object):
                 replay_buffers=replay_buffers,
             )
 
-        @beartype
-        def timer_wrapper() -> Callable[[], float]:
-            def _timer() -> float:
-                if self._cfg.cuda and not self.PRODUCTION_MODE:
-                    logger.debug("cuda syncing clocks")
-                    torch.cuda.synchronize()
-                return time.time()
-            return _timer
-
         # create an evaluation environment not to mess up with training rollouts
         eval_env, _, _, _, _ = make_env(
             self._cfg.env_id,
@@ -222,7 +211,6 @@ class MagicRunner(object):
             env=env,
             eval_env=eval_env,
             agent_wrapper=agent_wrapper,
-            timer_wrapper=timer_wrapper,
             name=self.name,
             device=device,
         )

@@ -3,8 +3,8 @@ import time
 import h5py
 from pathlib import Path
 from functools import partial
-from typing import Union, Callable, ContextManager
-from contextlib import contextmanager, nullcontext
+from typing import Union, Callable
+from contextlib import contextmanager
 
 from beartype import beartype
 from omegaconf import OmegaConf, DictConfig
@@ -21,9 +21,6 @@ from gymnasium.vector.vector_env import VectorEnv
 from helpers import logger
 from helpers.opencv_util import record_video
 from agents.agent import Agent
-
-
-DEBUG = False
 
 
 @beartype
@@ -236,7 +233,6 @@ def episode(env: Env,
     dones1 = []
     ep_len = 0
     ep_ret = 0
-    ep_tim = 0
 
     ob, _ = env.reset(seed=randomize_seed())
     obs0.append(ob)
@@ -267,7 +263,6 @@ def episode(env: Env,
             for info in infos["final_info"]:
                 ep_len = np.int64(info["episode"]["l"])
                 ep_ret = np.float64(info["episode"]["r"])
-                ep_tim = np.float64(info["episode"]["t"])
 
             obs0 = np.array(obs0)
             acs0 = np.array(acs0)
@@ -282,7 +277,6 @@ def episode(env: Env,
                 "dones1": dones1,
                 "ep_len": ep_len,
                 "ep_ret": ep_ret,
-                "ep_tim": ep_tim,
             }
             yield out
 
@@ -302,7 +296,6 @@ def train(cfg: DictConfig,
           env: Union[Env, VectorEnv],
           eval_env: Env,
           agent_wrapper: Callable[[], Agent],
-          timer_wrapper: Callable[[], Callable[[], float]],
           name: str,
           device: torch.device):
 
@@ -310,14 +303,6 @@ def train(cfg: DictConfig,
 
     # create an agent
     agent = agent_wrapper()
-
-    # create a timer
-    timer = timer_wrapper()
-
-    # create context manager
-    @beartype
-    def ctx(op: str) -> ContextManager:
-        return timed(op, timer) if DEBUG else nullcontext()
 
     # set up model save directory
     ckpt_dir = Path(cfg.checkpoint_dir) / name
@@ -377,19 +362,13 @@ def train(cfg: DictConfig,
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
-        logger.info((f"iter#{i}").upper())
         if i % cfg.eval_every == 0:
             logger.warn((f"iter#{i}").upper())
-            # so that when logger level is WARN, we see the iter number before the the eval metrics
 
         logger.info(("interact").upper())
-        its = timer()
         next(roll_gen)  # no need to get the returned segment, stored in buffer
         agent.timesteps_so_far += (cfg.segment_len * cfg.num_env)
         logger.info(f"so far {prettify_numb(agent.timesteps_so_far)} steps made")
-        logger.info(colored(
-            f"interaction time: {timer() - its}secs",
-            "green"))
 
         if agent.timesteps_so_far <= cfg.learning_starts:
             i += 1
@@ -397,9 +376,7 @@ def train(cfg: DictConfig,
 
         logger.info(("train").upper())
 
-        tts = timer()
-        ttl = []
-        for _ in range(tot := cfg.training_steps_per_iter):
+        for _ in range(cfg.training_steps_per_iter):
 
             # sample a batch of transitions and trajectories
             trns_batch = agent.sample_trns_batch()
@@ -408,27 +385,11 @@ def train(cfg: DictConfig,
             if cfg.actr_update_delay:
                 update_actr = bool(agent.crit_updates_so_far % 2)
             # update the actor and critic
-            with ctx("actor-critic training"):
-                agent.update_actr_crit(trns_batch, update_actr=update_actr)
-
-            ttl.append(timer() - tts)
-            tts = timer()
-
-        avg_tt_per_iter = None
-
-        logger.info(colored(
-            f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",
-            "green", attrs=["reverse"]))
-        logger.info(colored(
-            f"tot tt over {tot}steps: {np.sum(ttl)}secs",
-            "magenta", attrs=["reverse"]))
-
-        i += 1
+            agent.update_actr_crit(trns_batch, update_actr=update_actr)
 
         if i % cfg.eval_every == 0:
 
             logger.info(("eval").upper())
-
             len_buff, ret_buff = [], []
 
             for _ in range(cfg.eval_steps_per_iter):
@@ -461,15 +422,10 @@ def train(cfg: DictConfig,
             wandb_dict = {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
                 "vitals/rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
-                # taking the first because this one will always exist whatever the numenv
             }
-            if avg_tt_per_iter is not None:
-                wandb_dict.update({
-                    "vitals/avg-tt-per-iter": avg_tt_per_iter,
-                })
             wandb.log(wandb_dict, step=agent.timesteps_so_far)
 
-        logger.info()
+        i += 1
 
     # save once we are done
     agent.save(ckpt_dir, sfx="done")
