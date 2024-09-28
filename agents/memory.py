@@ -131,7 +131,7 @@ class ReplayBuffer(object):
         for k in self.ring_buffers:
             if not isinstance(trn[k], np.ndarray):
                 raise TypeError(k)
-            new_tensor = torch.Tensor(trn[k]).to(self.device, non_blocking=True)
+            new_tensor = torch.as_tensor(trn[k], device=self.device, dtype=torch.float)
             self.ring_buffers[k].append(v=new_tensor)
 
     @beartype

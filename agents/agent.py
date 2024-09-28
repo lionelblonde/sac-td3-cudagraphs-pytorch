@@ -142,7 +142,7 @@ class Agent(object):
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
-            self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
+            self.log_alpha = torch.as_tensor(self.hps.alpha_init, device=self.device).log()
 
             if self.hps.autotune:
                 # create learnable Lagrangian multiplier
@@ -180,8 +180,7 @@ class Agent(object):
     @beartype
     def predict(self, ob: np.ndarray, *, apply_noise: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
-        # create tensor from the state (`require_grad=False` by default)
-        ob_tensor = torch.Tensor(ob).to(self.device, non_blocking=True)
+        ob_tensor = torch.as_tensor(ob, device=self.device, dtype=torch.float)
 
         if self.ac_noise is not None:
             # using TD3
