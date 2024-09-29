@@ -149,7 +149,7 @@ class Agent(object):
         return None
 
     @beartype
-    def sample_batch(self) -> dict[str, torch.Tensor]:
+    def sample_batch(self) -> TensorDict:
         """Sample (a) batch(es) of transitions from the replay buffer(s)"""
         return self.rb.sample(self.hps.batch_size)
 
@@ -167,15 +167,15 @@ class Agent(object):
         return ac.clamp(self.min_ac, self.max_ac).cpu().numpy()
 
     @beartype
-    def build_loss_operands(self, trns_batch: dict[str, torch.Tensor]):
+    def build_loss_operands(self, batch: TensorDict):
 
         with torch.no_grad():
             # define inputs
-            state = trns_batch["observations"]
-            next_state = trns_batch["next_observations"]
-            action = trns_batch["actions"]
-            reward = trns_batch["rewards"]
-            done = trns_batch["dones"].float()
+            state = batch["observations"]
+            next_state = batch["next_observations"]
+            action = batch["actions"]
+            reward = batch["rewards"]
+            done = batch["dones"].float()
             td_len = torch.ones_like(done)
 
             if self.hps.batch_norm:

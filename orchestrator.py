@@ -110,7 +110,9 @@ def segment(env: Union[Env, VectorEnv],
 def episode(env: Env,
             agent: Agent,
             device: torch.device,
-            seed: int):
+            seed: int,
+            *,
+            need_lists: bool = False):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
@@ -121,33 +123,39 @@ def episode(env: Env,
         return seed + rng.integers(2**32 - 1, size=1).item()
         # seeded Generator: deterministic -> reproducible
 
-    obs0 = []
-    acs0 = []
-    obs1 = []
-    erews1 = []
-    dones1 = []
+    if need_lists:
+        obs_list = []
+        next_obs_list = []
+        actions_list = []
+        rewards_list = []
+        terminations_list = []
+        dones_list = []
     ep_len = 0
     ep_ret = 0
 
     ob, _ = env.reset(seed=randomize_seed())
-    obs0.append(ob)
+    if need_lists:
+        obs_list.append(ob)
     ob = torch.as_tensor(ob, device=device, dtype=torch.float)
 
     while True:
 
         # predict action
-        ac = agent.predict(ob, explore=False)
+        action = agent.predict(ob, explore=False)
 
-        acs0.append(ac)
-        new_ob, erew, terminated, truncated, infos = env.step(ac)
+        if need_lists:
+            actions_list.append(action)
 
-        done = terminated or truncated
-        dones1.append(done)
-        erews1.append(erew)
+        new_ob, reward, termination, truncation, infos = env.step(action)
 
-        obs1.append(new_ob)
-        if not done:
-            obs0.append(new_ob)
+        done = termination or truncation
+
+        if need_lists:
+            dones_list.append(done)
+            rewards_list.append(reward)
+            next_obs_list.append(new_ob)
+            if not done:
+                obs_list.append(new_ob)
 
         new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
         ob = new_ob
@@ -158,30 +166,35 @@ def episode(env: Env,
                 ep_len = float(info["episode"]["l"].item())
                 ep_ret = float(info["episode"]["r"].item())
 
-            obs0 = np.array(obs0)
-            acs0 = np.array(acs0)
-            obs1 = np.array(obs1)
-            erews1 = np.array(erews1)
-            dones1 = np.array(dones1)
-            out = {
-                "obs0": obs0,
-                "acs0": acs0,
-                "obs1": obs1,
-                "erews1": erews1,
-                "dones1": dones1,
-                "ep_len": ep_len,
-                "ep_ret": ep_ret,
-            }
+            if need_lists:
+                out = {
+                    "observations": np.array(obs_list),
+                    "actions": np.array(actions_list),
+                    "next_observations": np.array(next_obs_list),
+                    "rewards": np.array(rewards_list),
+                    "terminations": np.array(terminations_list),
+                    "dones": np.array(dones_list),
+                    "length": ep_len,
+                    "return": ep_ret,
+                }
+            else:
+                out = {
+                    "length": ep_len,
+                    "return": ep_ret,
+                }
             yield out
 
-            obs0 = []
-            acs0 = []
-            obs1 = []
-            erews1 = []
-            dones1 = []
+            if need_lists:
+                obs_list = []
+                next_obs_list = []
+                actions_list = []
+                rewards_list = []
+                terminations_list = []
+                dones_list = []
 
             ob, _ = env.reset(seed=randomize_seed())
-            obs0.append(ob)
+            if need_lists:
+                obs_list.append(ob)
             ob = torch.as_tensor(ob, device=device, dtype=torch.float)
 
 
@@ -331,8 +344,8 @@ def train(cfg: DictConfig,
 
             for _ in range(cfg.eval_steps):
                 ep = next(ep_gen)
-                len_buff.append(ep["ep_len"])
-                ret_buff.append(ep["ep_ret"])
+                len_buff.append(ep["length"])
+                ret_buff.append(ep["return"])
 
             with torch.no_grad():
                 eval_metrics = {
@@ -412,19 +425,19 @@ def evaluate(cfg: DictConfig,
     agent.load(cfg.load_ckpt)
 
     # create episode generator
-    ep_gen = episode(env, agent, device, cfg.seed)
+    ep_gen = episode(env, agent, device, cfg.seed, need_lists=cfg.gather_trajectories)
 
     pbar = tqdm.tqdm(range(cfg.num_episodes))
     pbar.set_description("evaluating")
 
-    len_buff = []
-    ret_buff = []
+    len_list = []
+    ret_list = []
 
     for i in pbar:
 
         ep = next(ep_gen)
-        len_buff.append(ep_len := ep["ep_len"])
-        ret_buff.append(ep_ret := ep["ep_ret"])
+        len_list.append(ep_len := ep["length"])
+        ret_list.append(ep_ret := ep["return"])
 
         if trajectory_path is not None:
             name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
@@ -437,8 +450,8 @@ def evaluate(cfg: DictConfig,
 
     with torch.no_grad():
         eval_metrics = {
-            "length": torch.tensor(list(len_buff), dtype=torch.float).mean(),
-            "return": torch.tensor(list(ret_buff), dtype=torch.float).mean(),
+            "length": torch.tensor(list(len_list), dtype=torch.float).mean(),
+            "return": torch.tensor(list(ret_list), dtype=torch.float).mean(),
         }
 
     # log with logger
