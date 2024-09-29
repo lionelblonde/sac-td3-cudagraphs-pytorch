@@ -64,6 +64,7 @@ class MagicRunner(object):
                  load_ckpt: Optional[str] = None):  # same as uuid: from arg or nothing
 
         logger.configure_default_logger()
+        logger.set_level(logger.DISABLED if self.DISABLE_LOGGER else self.LOGGER_LEVEL)
 
         # retrieve config from filesystem
         proj_root = Path(__file__).resolve().parent
@@ -129,15 +130,12 @@ class MagicRunner(object):
     def train(self):
 
         # logger
-        if self.DISABLE_LOGGER:
-            logger.set_level(logger.DISABLED)  # turn the logging off
-        else:
-            log_path = Path(self._cfg.log_dir) / self.name
-            log_path.mkdir(parents=True, exist_ok=True)
-            logger.configure(directory=log_path, format_strs=["log", "json", "csv"])
-            logger.set_level(self.LOGGER_LEVEL)
-            # save config in log dir
-            OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
+        log_path = Path(self._cfg.log_dir) / self.name
+        log_path.mkdir(parents=True, exist_ok=True)
+        logger.configure(directory=log_path, format_strs=["log", "json", "csv"])
+
+        # save config in log dir
+        OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
         # device
         device = self.setup_device()
@@ -216,11 +214,7 @@ class MagicRunner(object):
     def evaluate(self):
 
         # logger
-        if self.DISABLE_LOGGER:
-            logger.set_level(logger.DISABLED)  # turn the logging off
-        else:
-            logger.configure(directory=None, format_strs=["stdout"])
-            logger.set_level(self.LOGGER_LEVEL)
+        logger.configure(directory=None, format_strs=["stdout"])
 
         # device
         device = self.setup_device()
