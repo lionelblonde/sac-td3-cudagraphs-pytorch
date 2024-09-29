@@ -332,6 +332,7 @@ def train(cfg: DictConfig,
                 group=group,
                 config=config,
                 dir=cfg.root,
+                save_code=True,
             )
             break
         except CommError:
