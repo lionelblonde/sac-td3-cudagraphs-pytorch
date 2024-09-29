@@ -1,4 +1,5 @@
 from typing import Union, Optional, Callable
+from pathlib import Path
 
 from beartype import beartype
 import numpy as np
@@ -9,6 +10,7 @@ from gymnasium.wrappers.time_limit import TimeLimit
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from gymnasium.vector.sync_vector_env import SyncVectorEnv
 from gymnasium.vector.async_vector_env import AsyncVectorEnv
+from gymnasium.wrappers.record_video import RecordVideo
 
 
 # Farama Foundation Gymnasium MuJoCo
@@ -78,19 +80,23 @@ def make_env(env_id: str,
              *,
              sync_vec_env: bool,
              num_env: int,
-             capture_video: bool,
-    ) -> tuple[Union[Env, AsyncVectorEnv],
-    dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], np.ndarray, np.ndarray]:
+             video_path: Optional[Path] = None,
+             horizon: Optional[int] = None,
+    ) -> (tuple[Union[SyncVectorEnv, AsyncVectorEnv],
+          dict[str, tuple[int, ...]],
+          dict[str, tuple[int, ...]],
+          np.ndarray,
+          np.ndarray]):
 
-    # create an environment
-    bench = get_benchmark(env_id)  # at this point benchmark is valid
+    bench = get_benchmark(env_id)
 
     if bench == "farama_mujoco":
         return make_farama_mujoco_env(env_id,
                                       seed,
                                       sync_vec_env=sync_vec_env,
                                       num_env=num_env,
-                                      capture_video=capture_video)
+                                      video_path=video_path,
+                                      horizon=horizon)
     raise ValueError(f"invalid benchmark: {bench}")
 
 
@@ -100,15 +106,20 @@ def make_farama_mujoco_env(env_id: str,
                            *,
                            sync_vec_env: bool,
                            num_env: int,
-                           capture_video: bool,
+                           video_path: Optional[Path] = None,
                            horizon: Optional[int] = None,
-    ) -> tuple[Union[SyncVectorEnv, AsyncVectorEnv],
-    dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], np.ndarray, np.ndarray]:
+    ) -> (tuple[Union[SyncVectorEnv, AsyncVectorEnv],
+          dict[str, tuple[int, ...]],
+          dict[str, tuple[int, ...]],
+          np.ndarray,
+          np.ndarray]):
 
-    def make_env(*, render_mode: Optional[str] = None) -> Callable[[], Env]:
+    def make_env() -> Callable[[], Env]:
         def thunk() -> Env:
-            if render_mode is not None:
-                env = gym.make(env_id, render_mode=render_mode)
+            if video_path is not None:
+                assert sync_vec_env and (num_env == 1)
+                env = gym.make(env_id, render_mode="rgb_array")
+                env = RecordVideo(env, str(video_path))
             else:
                 env = gym.make(env_id)
             env = RecordEpisodeStatistics(env)
@@ -119,36 +130,27 @@ def make_farama_mujoco_env(env_id: str,
         return thunk
 
     # create env
-    if capture_video:
-        env = make_env(render_mode="rgb_array")
-        # env = RecordVideo(env, f"videos/{run_name}")
-        env = SyncVectorEnv([env])
-    else:
-        env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
-            [
-                make_env() for _ in range(num_env)
-            ],
-        )
+    env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
+        [
+            make_env() for _ in range(num_env)
+        ],
+    )
 
     net_shapes = {}
     erb_shapes = {}
 
-    # observations
+    # due diligence checks
     ob_space = env.observation_space
     assert isinstance(ob_space, gym.spaces.Box)
-    ob_shape = ob_space.shape
-    assert ob_shape is not None
-
-    # actions
     ac_space = env.action_space
     if isinstance(ac_space, gym.spaces.Discrete):
-        raise TypeError(f"env ({env}) is discrete: out of scope here")
+        raise TypeError("actions must be continuous")
     assert isinstance(ac_space, gym.spaces.Box)
 
+    ob_shape = ob_space.shape
     ac_shape = ac_space.shape
-    assert ac_shape is not None
-    net_shapes.update({"ob_shape": ob_shape, "ac_shape": ac_shape})
 
+    net_shapes.update({"ob_shape": ob_shape, "ac_shape": ac_shape})
     erb_shapes.update({
         "obs0": (ob_shape[-1],),
         "acs0": (ac_shape[-1],),
@@ -157,11 +159,8 @@ def make_farama_mujoco_env(env_id: str,
         "dones1": (1,),
     })
 
-    min_ac, max_ac = ac_space.low, ac_space.high
     # assert that all envs have the same action bounds
-    assert np.all(min_ac == min_ac[0])
-    assert np.all(max_ac == max_ac[0])
-    # replace them with the bounds of the first env
-    min_ac, max_ac = ac_space.low[0], ac_space.high[0]
+    assert np.all(ac_space.low == ac_space.low[0])
+    assert np.all(ac_space.high == ac_space.high[0])
 
-    return env, net_shapes, erb_shapes, min_ac, max_ac
+    return env, net_shapes, erb_shapes, ac_space.low[0], ac_space.high[0]

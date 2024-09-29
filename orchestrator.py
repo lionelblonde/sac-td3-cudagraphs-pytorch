@@ -21,7 +21,6 @@ from gymnasium.core import Env
 from gymnasium.vector.vector_env import VectorEnv
 
 from helpers import logger
-from helpers.opencv_util import record_video
 from agents.agent import Agent
 
 
@@ -510,10 +509,6 @@ def evaluate(cfg: DictConfig,
     if cfg.gather:
         rol_dir.mkdir(parents=True, exist_ok=True)
 
-    vid_dir = Path(cfg.video_dir) / name
-    if cfg.record:
-        vid_dir.mkdir(parents=True, exist_ok=True)
-
     # create an agent
     agent = agent_wrapper()
 
@@ -545,13 +540,7 @@ def evaluate(cfg: DictConfig,
         name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
 
         if cfg.gather:
-            # gather episode in file
             gather_roll(rol_dir, name, traj)
-
-        if cfg.record:
-            # record a video of the episode
-            frame_collection = env.render()
-            record_video(vid_dir, name, np.array(frame_collection))
 
     eval_metrics: dict[str, np.floating] = {  # type-checker
         "length": np.mean(np.array(len_buff)),

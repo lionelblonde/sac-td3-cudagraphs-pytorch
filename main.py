@@ -133,6 +133,12 @@ class MagicRunner(object):
         log_path.mkdir(parents=True, exist_ok=True)
         logger.configure(directory=log_path, format_strs=["log", "json", "csv"])
 
+        # video capture
+        video_path = None
+        if self._cfg.capture_video:
+            video_path = Path(self._cfg.video_dir) / self.name
+            video_path.mkdir(parents=True, exist_ok=True)
+
         # save config in log dir
         OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
@@ -142,25 +148,22 @@ class MagicRunner(object):
         device = self.setup_device()
         generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
-        # env
+        # envs
         env, net_shapes, erb_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.seed,
             sync_vec_env=self._cfg.sync_vec_env,
             num_env=self._cfg.num_env,
-            capture_video=False,
         )
-        # eval env
         eval_env, _, _, _, _ = make_env(
             self._cfg.env_id,
             self._cfg.seed,
             sync_vec_env=True,
             num_env=1,
-            capture_video=self._cfg.capture_video,
+            video_path=video_path,
         )
 
-        # create an agent wrapper
-
+        # agent
         replay_buffers = [ReplayBuffer(
             generator=generator,
             capacity=self._cfg.rbx_capacity,
@@ -202,8 +205,11 @@ class MagicRunner(object):
     @beartype
     def evaluate(self):
 
-        # logger
-        logger.configure(directory=None, format_strs=["stdout"])
+        # video capture
+        video_path = None
+        if self._cfg.capture_video:
+            video_path = Path(self._cfg.video_dir) / self.name
+            video_path.mkdir(parents=True, exist_ok=True)
 
         # seed and device
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
@@ -217,10 +223,11 @@ class MagicRunner(object):
             self._cfg.seed,
             sync_vec_env=True,
             num_env=1,
-            capture_video=self._cfg.capture_video,
+            video_path=video_path,
         )
         assert isinstance(env, Env), "no vecenv allowed here"
 
+        # agent
         @beartype
         def agent_wrapper() -> Agent:
             return Agent(
