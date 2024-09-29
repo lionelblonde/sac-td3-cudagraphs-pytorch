@@ -27,7 +27,7 @@ batch_norm: true
 layer_norm: false
 
 # optimization
-actr_lr: 3e-4
+actor_lr: 3e-4
 crit_lr: 3e-4
 clip_norm: 0.
 
@@ -39,8 +39,8 @@ rbx_capacity: 1000000
 polyak: 0.005
 prefer_td3_over_sac: true
 bcq_style_targ_mix: true
-actr_update_delay: true
-actr_noise_std: 0.1
+actor_update_delay: true
+actor_noise_std: 0.1
 targ_actor_smoothing: true
 td3_std: 0.2
 td3_c: 0.5

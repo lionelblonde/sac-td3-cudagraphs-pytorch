@@ -23,8 +23,6 @@ from agents.memory import ReplayBuffer
 
 class Agent(object):
 
-    TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
-
     @beartype
     def __init__(self,
                  net_shapes: dict[str, tuple[int, ...]],
@@ -45,8 +43,8 @@ class Agent(object):
         self.hps = hps
 
         self.timesteps_so_far = 0
-        self.actr_updates_so_far = 0
-        self.crit_updates_so_far = 0
+        self.actor_updates_so_far = 0
+        self.qnet_updates_so_far = 0
 
         self.best_eval_ep_ret = -float("inf")  # updated in orchestrator
 
@@ -64,65 +62,51 @@ class Agent(object):
 
         # create online and target nets
 
-        actr_net_args = [self.ob_shape,
-                         self.ac_shape,
-                         (256, 256),
-                         self.rms_obs,
-                         self.min_ac,
-                         self.max_ac]
-        actr_net_kwargs = {"layer_norm": self.hps.layer_norm,
-                           "device": self.device}
-        if not self.hps.prefer_td3_over_sac:
-            assert generator is not None
-            actr_net_kwargs.update({"generator": generator})
-            actr_module = TanhGaussActor
-        else:
-            actr_net_kwargs.update({"exploration_noise": self.hps.actr_noise_std})
-            actr_module = Actor
-        self.actr = actr_module(*actr_net_args, **actr_net_kwargs)
+        actor_net_args = [self.ob_shape,
+                          self.ac_shape,
+                          (256, 256),
+                          self.rms_obs,
+                          self.min_ac,
+                          self.max_ac]
+        actor_net_kwargs = {"layer_norm": self.hps.layer_norm}
         if self.hps.prefer_td3_over_sac:
-            # using TD3 (SAC does not use a target actor)
-            self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs)
-            # note: could use `actr_module` equivalently, but prefer most explicit
+            actor_net_kwargs.update({"exploration_noise": self.hps.actor_noise_std})
+        else:
+            actor_net_kwargs.update({"generator": generator})
 
-        crit_net_args = [self.ob_shape,
+        self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
+            *actor_net_args, **actor_net_kwargs, device=self.device)
+        self.actor_params = TensorDict.from_module(self.actor, as_module=True)
+        assert self.actor_params.data is not None
+        self.actor_target = self.actor_params.data.clone()
+        # discard params of net
+        self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
+            *actor_net_args, **actor_net_kwargs, device="meta")
+        self.actor_params.to_module(self.actor)
+
+        qnet_net_args = [self.ob_shape,
                          self.ac_shape,
                          (256, 256),
                          self.rms_obs]
-        crit_net_kwargs = {"layer_norm": self.hps.layer_norm,
-                           "device": self.device}
-        self.crit = Critic(*crit_net_args, **crit_net_kwargs)
-        self.twin = Critic(*crit_net_args, **crit_net_kwargs)
-        # self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs)
-        # self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs)
+        qnet_net_kwargs = {"layer_norm": self.hps.layer_norm}
 
-        self.qnet_params = TensorDict.from_modules(self.crit, self.twin, as_module=True)
+        self.qnet1 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
+        self.qnet2 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
+        self.qnet_params = TensorDict.from_modules(self.qnet1, self.qnet2, as_module=True)
         assert self.qnet_params.data is not None
         self.qnet_target = self.qnet_params.data.clone()
         # discard params of net
-        self.qnet = Critic(*crit_net_args, layer_norm=self.hps.layer_norm, device="meta")
+        self.qnet = Critic(*qnet_net_args, **qnet_net_kwargs, device="meta")
         self.qnet_params.to_module(self.qnet)
 
-        # initilize the target nets
-        if self.hps.prefer_td3_over_sac:
-            # using TD3 (SAC does not use a target actor)
-            self.targ_actr.load_state_dict(self.actr.state_dict())
-        # self.targ_crit.load_state_dict(self.crit.state_dict())
-        # self.targ_twin.load_state_dict(self.twin.state_dict())
-
         # set up the optimizers
-        self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actr_lr)
 
-        # self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.crit_lr)
-        # self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
         self.q_optimizer = Adam(
             self.qnet.parameters(),
-            lr=self.hps.crit_lr)
-            # capturable=args.cudagraphs and not args.compile)
+            lr=self.hps.crit_lr)  # capturable=args.cudagraphs and not args.compile)
         self.actor_optimizer = Adam(
-            list(self.actr.parameters()),
-            lr=self.hps.actr_lr)
-            # capturable=args.cudagraphs and not args.compile)
+            list(self.actor.parameters()),
+            lr=self.hps.actor_lr)  # capturable=args.cudagraphs and not args.compile)
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
@@ -136,17 +120,22 @@ class Agent(object):
                 self.loga_opt = Adam([self.log_alpha], lr=self.hps.log_alpha_lr)
 
         # log module architectures
-        log_module_info(self.actr)
-        log_module_info(self.crit)
-        log_module_info(self.twin)
+        log_module_info(self.actor)
+        log_module_info(self.qnet1)
+        log_module_info(self.qnet2)
 
     # TODO(lionel): beartype this
-    def batched_qf(self, params, obs, action, next_q_value=None):
+    def batched_qf(self, params, ob, action, next_q_value=None):
         with params.to_module(self.qnet):
-            vals = self.qnet(obs, action)
+            vals = self.qnet(ob, action)
             if next_q_value is not None:
                 return ff.mse_loss(vals.view(-1), next_q_value)
             return vals
+
+    # TODO(lionel): beartype this
+    def pi(self, params, ob):
+        with params.to_module(self.actor):
+            return self.actor(ob)
 
     @beartype
     @property
@@ -176,11 +165,11 @@ class Agent(object):
         if self.hps.prefer_td3_over_sac:
             with torch.no_grad():
                 # using TD3
-                ac = self.actr(ob) if explore else self.actr.explore(ob)
+                ac = self.actor(ob) if explore else self.actor.explore(ob)
         else:
             # using SAC
             # actions from sample and mode are detached by default
-            ac = (self.actr.sample(ob) if explore else self.actr.mode(ob))
+            ac = (self.actor.sample(ob) if explore else self.actor.mode(ob))
         return ac.clamp(self.min_ac, self.max_ac).cpu().numpy()
 
     @beartype
@@ -203,17 +192,17 @@ class Agent(object):
         # compute target action
         if self.hps.prefer_td3_over_sac:
             # using TD3
+            pi_next_target = self.pi(self.actor_target, next_state)  # target actor
             if self.hps.targ_actor_smoothing:
                 n_ = action.clone().detach().normal_(0., self.hps.td3_std)
                 assert n_.device == self.device
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
-                next_action = (
-                    self.targ_actr(next_state) + n_).clamp(self.min_ac, self.max_ac)
+                next_action = (pi_next_target + n_).clamp(self.min_ac, self.max_ac)
             else:
-                next_action = self.targ_actr(next_state)
+                next_action = pi_next_target
         else:
             # using SAC
-            next_action = self.actr.sample(next_state, stop_grad=True)
+            next_action = self.actor.sample(next_state, stop_grad=True)
 
         return state, action, next_state, next_action, reward, done, td_len
 
@@ -233,12 +222,12 @@ class Agent(object):
 
         if self.hps.prefer_td3_over_sac:
             # using TD3
-            action_from_actr = self.actr(state)
+            action_from_actor = self.actor(state)
             log_prob = None  # quiets down the type checker
         else:
             # using SAC
-            action_from_actr = self.actr.sample(state, stop_grad=False)
-            log_prob = self.actr.logp(state, action_from_actr)
+            action_from_actor = self.actor.sample(state, stop_grad=False)
+            log_prob = self.actor.logp(state, action_from_actor)
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -254,36 +243,26 @@ class Agent(object):
             # yields to poor results, showing how allowing for non-zero gradients for the mean
             # can have a destructive effect, and that is why SAC does not allow them to flow.
 
-        # compute qz estimates
-        # q = self.crit(state, action)
-        # twin_q = self.twin(state, action)
-
-        # compute target qz estimate and same for twin
-
         self.q_optimizer.zero_grad()
 
         with torch.no_grad():
-            # q_prime = self.targ_crit(next_state, next_action)
-            # twin_q_prime = self.targ_twin(next_state, next_action)
-
             qf_next_target = torch.vmap(self.batched_qf, (0, None, None))(
                 self.qnet_target, next_state, next_action,
             )
-            q_prime = qf_next_target[0]
-            twin_q_prime = qf_next_target[1]
 
+            qf_min = qf_next_target.min(0).values
             if self.hps.bcq_style_targ_mix:
                 # use BCQ style of target mixing: soft minimum
-                q_prime = (0.75 * torch.min(q_prime, twin_q_prime) +
-                           0.25 * torch.max(q_prime, twin_q_prime))
+                qf_max = qf_next_target.max(0).values
+                q_prime = ((0.75 * qf_min) + (0.25 * qf_max))
             else:
                 # use TD3 style of target mixing: hard minimum
-                q_prime = torch.min(q_prime, twin_q_prime)
+                q_prime = qf_min
 
             if not self.hps.prefer_td3_over_sac:  # only for SAC
                 assert self.alpha is not None
                 # add the causal entropy regularization term
-                next_log_prob = self.actr.logp(next_state, next_action)
+                next_log_prob = self.actor.logp(next_state, next_action)
                 q_prime -= self.alpha.detach() * next_log_prob
 
             # assemble the Bellman target
@@ -295,49 +274,42 @@ class Agent(object):
         )
         qf_loss = qf_a_values.sum(0)
 
-        # critic and twin losses
-        # crit_loss = ff.mse_loss(q, targ_q)
-        # twin_loss = ff.mse_loss(twin_q, targ_q)
-
         # actor loss
         self.actor_optimizer.zero_grad()
 
         if self.hps.prefer_td3_over_sac:
-            # actr_loss = -self.crit(state, action_from_actr)
             qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_params.data, state, action_from_actr)
+                self.qnet_params.data, state, action_from_actor)
             min_qf_pi = qf_pi[0]
-            actr_loss = -min_qf_pi
+            actor_loss = -min_qf_pi
         else:
             assert self.alpha is not None
-            # min_qf_pi = torch.min(self.crit(state, action_from_actr),
-            #                       self.twin(state, action_from_actr))
             qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_params.data, state, action_from_actr)
+                self.qnet_params.data, state, action_from_actor)
             min_qf_pi = qf_pi.min(0).values
-            actr_loss = (self.alpha.detach() * log_prob) - min_qf_pi
-            if not actr_loss.mean().isfinite():
+            actor_loss = (self.alpha.detach() * log_prob) - min_qf_pi
+            if not actor_loss.mean().isfinite():
                 raise ValueError("NaNs: numerically unstable arctanh func")
-        actr_loss = actr_loss.mean()
+        actor_loss = actor_loss.mean()
 
         if (not self.hps.prefer_td3_over_sac) and self.hps.autotune:
             assert log_prob is not None
+            self.loga_opt.zero_grad()
             loga_loss = (self.log_alpha * (-log_prob - self.targ_ent).detach()).mean()
 
-        return actr_loss, qf_loss, loga_loss
+        return actor_loss, qf_loss, loga_loss
 
     @beartype
-    def update_actr(self, actr_loss: torch.Tensor, loga_loss: Optional[torch.Tensor]):
+    def update_actor(self, actor_loss: torch.Tensor, loga_loss: Optional[torch.Tensor]):
 
-        actr_loss.backward()
+        actor_loss.backward()
         if self.hps.clip_norm > 0:
-            cg.clip_grad_norm_(self.actr.parameters(), self.hps.clip_norm)
+            cg.clip_grad_norm_(self.actor.parameters(), self.hps.clip_norm)
         self.actor_optimizer.step()
 
         if loga_loss is not None:
             # update alpha
             assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
-            self.loga_opt.zero_grad()
             loga_loss.backward()
             self.loga_opt.step()
 
@@ -350,34 +322,14 @@ class Agent(object):
     def update_targ_nets(self):
 
         if (self.hps.prefer_td3_over_sac or (
-            self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0)):
+            self.qnet_updates_so_far % self.hps.crit_targ_update_freq == 0)):
 
-            with torch.no_grad():
-                # lerp is defined as x' = x + w (y-x), which is equivalent to x' = (1-w) x + w y
-                self.qnet_target.lerp_(self.qnet_params.data, self.hps.polyak)
+            # lerp is defined as x' = x + w (y-x), which is equivalent to x' = (1-w) x + w y
 
-                # if self.hps.prefer_td3_over_sac:
-                #     # using TD3 (SAC does not use a target actor)
-                #     self.targ_actr.parameters().lerp_(self.actr.parameters, self.hps.polyak)
-
-                if self.hps.prefer_td3_over_sac:
-                    # using TD3 (SAC does not use a target actor)
-                    for param, targ_param in zip(self.actr.parameters(),
-                                                 self.targ_actr.parameters()):
-                        new_param = self.hps.polyak * param
-                        new_param += (1. - self.hps.polyak) * targ_param
-                        targ_param.copy_(new_param)
-
-                # for param, targ_param in zip(self.crit.parameters(),
-                #                              self.targ_crit.parameters()):
-                #     new_param = self.hps.polyak * param
-                #     new_param += (1. - self.hps.polyak) * targ_param
-                #     targ_param.copy_(new_param)
-                # for param, targ_param in zip(self.twin.parameters(),
-                #                              self.targ_twin.parameters()):
-                #     new_param = self.hps.polyak * param
-                #     new_param += (1. - self.hps.polyak) * targ_param
-                #     targ_param.copy_(new_param)
+            self.qnet_target.lerp_(self.qnet_params.data, self.hps.polyak)
+            if self.hps.prefer_td3_over_sac:
+                # using TD3 (SAC does not use a target actor)
+                self.actor_target.lerp_(self.actor_params.data, self.hps.polyak)
 
     @beartype
     def save(self, path: Path, sfx: Optional[str] = None):
@@ -392,10 +344,10 @@ class Agent(object):
             "hps": self.hps,  # handy for archeology
             "timesteps_so_far": self.timesteps_so_far,
             # and now the state_dict objects
-            "actr": self.actr.state_dict(),
-            "crit": self.crit.state_dict(),
-            "twin": self.twin.state_dict(),
-            "actr_opt": self.actr_opt.state_dict(),
+            "actor": self.actor.state_dict(),
+            "qnet1": self.qnet1.state_dict(),
+            "qnet2": self.qnet2.state_dict(),
+            "actor_optimizer": self.actor_optimizer.state_dict(),
             "q_optimizer": self.q_optimizer.state_dict(),
         }
         if self.hps.batch_norm:
@@ -420,9 +372,10 @@ class Agent(object):
         if self.hps.batch_norm:
             assert self.rms_obs is not None
             self.rms_obs.load_state_dict(checkpoint["rms_obs"])
-        self.actr.load_state_dict(checkpoint["actr"])
-        self.crit.load_state_dict(checkpoint["crit"])
-        self.actr_opt.load_state_dict(checkpoint["actr_opt"])
+        self.actor.load_state_dict(checkpoint["actor"])
+        self.qnet1.load_state_dict(checkpoint["qnet1"])
+        self.qnet2.load_state_dict(checkpoint["qnet2"])
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
         self.q_optimizer.load_state_dict(checkpoint["q_optimizer"])
 
     @beartype
@@ -431,7 +384,7 @@ class Agent(object):
         dictconfig1: DictConfig,
         dictconfig2: DictConfig,
     ) -> dict[str, dict[str, Union[str, int, list[int], dict[str, Union[str, int, list[int]]]]]]:
-        """Compare two DictConfig objects and return the differences.
+        """Compare two DictConfig objects of depth=1 and return the differences.
         Returns a dictionary with keys "added", "removed", and "changed".
         """
         differences = {"added": {}, "removed": {}, "changed": {}}
