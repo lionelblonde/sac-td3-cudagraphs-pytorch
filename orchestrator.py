@@ -41,9 +41,6 @@ def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
     del data, stts
 
 
-gather_roll = save_dict_h5py  # alias
-
-
 @beartype
 def load_dict_h5py(fname: Union[str, Path],
     ) -> tuple[dict[str, np.ndarray],
@@ -302,7 +299,6 @@ def train(cfg: DictConfig,
 
     assert isinstance(cfg, DictConfig)
 
-    # create an agent
     agent = agent_wrapper()
 
     # set up model save directory
@@ -313,13 +309,11 @@ def train(cfg: DictConfig,
     agent.save(ckpt_dir, sfx="dryrun")
     logger.info(f"dry run -- saved model @: {ckpt_dir}")
 
-    # group by everything except the seed, which is last, hence index -1
-    # it groups by uuid + gitSHA + env_id
-    group = ".".join((ename := name).split(".")[:-1])  # nitpicking walrus for alignment
-    logger.warn(f"{ename=}")
-    logger.warn(f"{group=}")
     # set up wandb
     os.environ["WANDB__SERVICE_WAIT"] = "300"
+    group = ".".join(name.split(".")[:-1])  # everything in name except seed
+    logger.warn(f"{name=}")
+    logger.warn(f"{group=}")
     while True:
         try:
             config = OmegaConf.to_object(cfg)
@@ -505,50 +499,39 @@ def evaluate(cfg: DictConfig,
 
     assert isinstance(cfg, DictConfig)
 
-    rol_dir = Path(cfg.roll_dir) / name
-    if cfg.gather:
+    rol_dir = None
+    if cfg.gather_trajectories:
+        rol_dir = Path(cfg.roll_dir) / name
         rol_dir.mkdir(parents=True, exist_ok=True)
 
-    # create an agent
     agent = agent_wrapper()
 
-    # create episode generator
-    ep_gen = episode(
-        env,
-        agent,
-        device,
-        cfg.seed,
-    )
-
-    # load the model
     agent.load(cfg.load_ckpt)
 
-    # collect trajectories
+    # create episode generator
+    ep_gen = episode(env, agent, device, cfg.seed)
 
-    len_buff, ret_buff = [], []
+    len_buff = []
+    ret_buff = []
 
     for i in range(n := cfg.num_episodes):
 
         logger.warn(f"EVAL [{str(i + 1).zfill(3)}/{str(n).zfill(3)}]")
-        traj = next(ep_gen)
-        ep_len, ep_ret = traj["ep_len"], traj["ep_ret"]
 
-        # aggregate to the history data structures
-        len_buff.append(ep_len)
-        ret_buff.append(ep_ret)
+        ep = next(ep_gen)
+        len_buff.append(ep_len := ep["ep_len"])
+        ret_buff.append(ep_ret := ep["ep_ret"])
 
-        name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
+        if rol_dir is not None:
+            save_dict_h5py(rol_dir, f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}", ep)
 
-        if cfg.gather:
-            gather_roll(rol_dir, name, traj)
-
-    eval_metrics: dict[str, np.floating] = {  # type-checker
-        "length": np.mean(np.array(len_buff)),
-        "return": np.mean(np.array(ret_buff))}
+    with torch.no_grad():
+        eval_metrics = {
+            "length": torch.tensor(list(len_buff), dtype=torch.float).mean(),
+            "return": torch.tensor(list(ret_buff), dtype=torch.float).mean(),
+        }
 
     # log with logger
-    logger.record_tabular("timestep", agent.timesteps_so_far)
-    for kv in eval_metrics.items():
-        logger.record_tabular(*kv)
-    logger.info("dumping stats in .csv file")
+    for k, v in eval_metrics.items():
+        logger.record_tabular(k, v.numpy())
     logger.dump_tabular()

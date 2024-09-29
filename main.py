@@ -52,7 +52,6 @@ def get_name(uuid: str, env_id: str, seed: int) -> str:
 
 class MagicRunner(object):
 
-    DISABLE_LOGGER: bool = False
     LOGGER_LEVEL: int = logger.WARN
 
     @beartype
@@ -64,7 +63,7 @@ class MagicRunner(object):
                  load_ckpt: Optional[str] = None):  # same as uuid: from arg or nothing
 
         logger.configure_default_logger()
-        logger.set_level(logger.DISABLED if self.DISABLE_LOGGER else self.LOGGER_LEVEL)
+        logger.set_level(self.LOGGER_LEVEL)
 
         # retrieve config from filesystem
         proj_root = Path(__file__).resolve().parent
@@ -86,7 +85,8 @@ class MagicRunner(object):
 
         assert "wandb_project" in self._cfg  # if not in cfg from fs, abort
         if wandb_project is not None:
-            self._cfg.wandb_project = wandb_project  # overwrite cfg
+            # override wandb project name (spawner)
+            self._cfg.wandb_project = wandb_project
 
         assert "uuid" not in self._cfg  # uuid should never be in the cfg file
         self._cfg.uuid = uuid if uuid is not None else make_uuid()
@@ -99,7 +99,6 @@ class MagicRunner(object):
 
         self.name = get_name(self._cfg.uuid, self._cfg.env_id, self._cfg.seed)
 
-        # slight overwrite for consistency, before setting to read-only
         if self._cfg.num_env > 1:
             assert self._cfg.batch_size >= self._cfg.num_env
             # override batch size to preserve batch size in cfg
@@ -132,15 +131,16 @@ class MagicRunner(object):
         log_path = Path(self._cfg.log_dir) / self.name
         log_path.mkdir(parents=True, exist_ok=True)
         logger.configure(directory=log_path, format_strs=["log", "json", "csv"])
+        logger.set_level(self.LOGGER_LEVEL)
+
+        # save config in log dir
+        OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
         # video capture
         video_path = None
         if self._cfg.capture_video:
             video_path = Path(self._cfg.video_dir) / self.name
             video_path.mkdir(parents=True, exist_ok=True)
-
-        # save config in log dir
-        OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
         # seed and device
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
@@ -204,6 +204,10 @@ class MagicRunner(object):
 
     @beartype
     def evaluate(self):
+
+        # logger
+        logger.configure(directory=None, format_strs=["stdout"])
+        logger.set_level(self.LOGGER_LEVEL)
 
         # video capture
         video_path = None
