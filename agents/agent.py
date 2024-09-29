@@ -1,11 +1,9 @@
 import tempfile
 from pathlib import Path
 from typing import Optional, Union, Any
-from collections import defaultdict
 
 from beartype import beartype
 from omegaconf import OmegaConf, DictConfig
-from einops import pack
 import wandb
 import numpy as np
 import torch
@@ -154,21 +152,8 @@ class Agent(object):
     @beartype
     def sample_batch(self) -> dict[str, torch.Tensor]:
         """Sample (a) batch(es) of transitions from the replay buffer(s)"""
-
-        # # assert self.replay_buffers is not None
-        # batches = defaultdict(list)
-        # for rb in self.replay_buffers:
-        #     batch = rb.sample(self.hps.batch_size)
-        #     for k, v in batch.items():
-        #         batches[k].append(v)
-        # out = {}
-        # for k, v in batches.items():
-        #     out[k], _ = pack(v, "* d")  # equiv to: rearrange(v, "n b d -> (n b) d")
-
         assert self.rb is not None
-        out = self.rb.sample(self.hps.batch_size)
-        # print(out.size())
-        return out
+        return self.rb.sample(self.hps.batch_size)
 
     @beartype
     def predict(self, ob: torch.Tensor, *, explore: bool) -> np.ndarray:
@@ -194,12 +179,6 @@ class Agent(object):
             reward = trns_batch["rewards"]
             done = trns_batch["dones"].float()
             td_len = torch.ones_like(done)
-
-            # print("state", state.size())
-            # print("reward", reward.size())
-            # print("td_len", td_len.size())
-            #
-            # raise ValueError()
 
             if self.hps.batch_norm:
                 assert self.rms_obs is not None

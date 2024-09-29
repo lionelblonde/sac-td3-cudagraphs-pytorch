@@ -2,8 +2,7 @@ import os
 import time
 import tqdm
 from pathlib import Path
-from functools import partial
-from typing import Union, Callable, Iterable
+from typing import Union, Callable
 from contextlib import contextmanager
 from collections import deque
 
@@ -49,7 +48,6 @@ def timed(op: str, timer: Callable[[], float]):
 
 @beartype
 def segment(env: Union[Env, VectorEnv],
-            num_env: int,
             agent: Agent,
             device: torch.device,
             seed: int,
@@ -59,7 +57,7 @@ def segment(env: Union[Env, VectorEnv],
 
     obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
     obs = torch.as_tensor(obs, device=device, dtype=torch.float)
-    actions = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
+    actions = None  # as long as r is init at 0: ac will be written over
 
     t = 0
     r = 0  # action repeat reference
@@ -90,34 +88,8 @@ def segment(env: Union[Env, VectorEnv],
                 real_next_obs[idx] = torch.as_tensor(
                     infos["final_observation"][idx], device=device, dtype=torch.float)
 
-        # if num_env == 1:
-        #     rew = np.array([rew])
-
         rewards = rearrange(rewards, "b -> b 1")
         terminations = rearrange(terminations, "b -> b 1")
-
-        # rew = torch.as_tensor(rew, device=device, dtype=torch.float)
-
-        # if num_env > 1:
-        #     logger.debug(f"{terminated=} | {truncated=}")
-        #     assert isinstance(terminated, np.ndarray)
-        #     assert isinstance(truncated, np.ndarray)
-        #     assert terminated.shape == truncated.shape
-
-        # if num_env == 1:
-        #     assert isinstance(env, Env)
-        #     done, terminated = np.array([terminated or truncated]), np.array([terminated])
-        #     if truncated:
-        #         logger.debug("termination caused by something like time limit or out of bounds?")
-        # else:
-        #     done = np.logical_or(terminated, truncated)  # might not be used but diagnostics
-        #     done, terminated = rearrange(done, "b -> b 1"), rearrange(terminated, "b -> b 1")
-        #     # `done` is technically not used, but this quiets down the type-checker
-        # # read about what truncation means at the link below:
-        # # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
-
-        # tr_or_vtr = [ob, ac, new_ob, rew, terminated]
-        # # note: we use terminated as a done replacement, but keep the key "dones1"
 
         tr = {
             "observations": obs,
@@ -132,62 +104,10 @@ def segment(env: Union[Env, VectorEnv],
 
         agent.rb.extend(td)
 
-
-
-        # if num_env > 1:
-        #     pp_func = partial(postproc_vtr, num_env, device, infos)
-        # else:
-        #     assert isinstance(env, Env)
-        #     pp_func = postproc_tr
-        # outs = pp_func(tr_or_vtr)
-        # assert outs is not None
-        # for i, out in enumerate(outs):  # iterate over env (although maybe only one non-vec)
-        #     # add transition to the i-th replay buffer
-        #     agent.replay_buffers[i].append(out)
-        #     # log how filled the i-th replay buffer is
-        #     logger.debug(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
-
-
-
         obs = next_obs
 
         t += 1
         r += 1
-
-
-# @beartype
-# def postproc_vtr(num_envs: int,
-#                  device: torch.device,
-#                  infos: dict[str, np.ndarray],
-#                  vtr: list[Union[np.ndarray, torch.Tensor]],
-#     ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
-#     # N.B.: for the num of envs and the workloads, serial treatment is faster than parallel
-#     # time it takes for the main process to spawn X threads is too much overhead
-#     # it starts becoming interesting if the post-processing is heavier though
-#     outs = []
-#     for i in range(num_envs):
-#         tr = [e[i] for e in vtr]
-#         if "final_observation" in infos:
-#             if bool(infos["_final_observation"][i]):
-#                 ob, ac, _, rew, terminated = tr
-#                 logger.debug("writing over new_ob with info[final_observation]")
-#                 real_new_ob = torch.as_tensor(
-#                     infos["final_observation"][i], device=device, dtype=torch.float)
-#                 tr = [ob, ac, real_new_ob, rew, terminated]  # override `new_ob`
-#         outs.extend(postproc_tr(tr))
-#     return outs
-#
-#
-# @beartype
-# def postproc_tr(tr: list[Union[np.ndarray, torch.Tensor]],
-#     ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
-#     ob, ac, new_ob, rew, terminated = tr
-#     return [
-#         {"obs0": ob,
-#          "acs0": ac,
-#          "obs1": new_ob,
-#          "erews1": rew,
-#          "dones1": terminated}]
 
 
 @beartype
@@ -318,7 +238,6 @@ def train(cfg: DictConfig,
     # create segment generator for training the agent
     roll_gen = segment(
         env,
-        cfg.num_env,
         agent,
         device,
         cfg.seed,
@@ -439,7 +358,6 @@ def train(cfg: DictConfig,
             logger.dump_tabular()
 
             # log with wandb
-            assert agent.replay_buffers is not None
             elog = {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
             }
