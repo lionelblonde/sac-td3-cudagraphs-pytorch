@@ -126,8 +126,7 @@ class TanhNormalToolkit(object):
                *,
                generator: torch.Generator,
                scale: torch.Tensor,
-               bias: torch.Tensor,
-    ) -> torch.Tensor:
+               bias: torch.Tensor) -> torch.Tensor:
         sample = NormalToolkit.sample(mean, std, generator)
         sample = torch.tanh(sample)
         return sample * scale + bias

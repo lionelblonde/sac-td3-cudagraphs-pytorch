@@ -364,9 +364,11 @@ def train(cfg: DictConfig,
     start_time = None
     measure_burnin = None
     pbar = tqdm.tqdm(range(cfg.num_timesteps))
-    maxlen = 20 * cfg.eval_steps
-    len_buff, ret_buff = deque(maxlen=maxlen), deque(maxlen=maxlen)
     time_spent_eval = 0
+
+    maxlen = 20 * cfg.eval_steps
+    len_buff = deque(maxlen=maxlen)
+    ret_buff = deque(maxlen=maxlen)
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
@@ -389,13 +391,49 @@ def train(cfg: DictConfig,
 
         logger.info(("train").upper())
         for _ in range(cfg.training_steps_per_iter):
+            # sample a batch of transitions
             trns_batch = agent.sample_trns_batch()
-            # determine if updating the actr
-            update_actr = True
-            if cfg.actr_update_delay:
-                update_actr = bool(agent.crit_updates_so_far % 2)
-            # update the actor and critic
-            agent.update_actr_crit(trns_batch, update_actr=update_actr)
+            # assemble the loss operands
+            operands = agent.build_loss_operands(trns_batch)
+            # compute the losses
+            log = {}
+            with agent.ctx:
+                actr_loss, crit_loss, twin_loss, loga_loss = agent.compute_losses(*operands)
+            # update the online networks
+            if not cfg.actr_update_delay or bool(agent.crit_updates_so_far % 2):
+                agent.update_actr(actr_loss, loga_loss)
+                agent.actr_updates_so_far += 1
+                log.update(
+                    {
+                        "loss/actr": actr_loss,
+                    },
+                )
+                if loga_loss is not None:
+                    log.update(
+                        {
+                            "loss/loga": loga_loss,
+                            "vitals/alpha": agent.alpha,
+                        },
+                    )
+            agent.update_crit(crit_loss, twin_loss)
+            agent.crit_updates_so_far += 1
+            log.update(
+                {
+                    "loss/crit": crit_loss,
+                    "loss/twin": twin_loss,
+                },
+            )
+            # update the target networks
+            agent.update_targ_nets()
+
+            if agent.crit_updates_so_far % (100 * cfg.training_steps_per_iter) == 0:
+                # log
+                wandb.log(
+                    {
+                       **log,
+                    },
+                    step=agent.timesteps_so_far,
+                )
 
         if (agent.timesteps_so_far % cfg.eval_every == 0):
             logger.info(("eval").upper())

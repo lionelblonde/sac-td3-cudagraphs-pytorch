@@ -171,6 +171,40 @@ class Agent(object):
         return ac.clamp(self.min_ac, self.max_ac).cpu().numpy()
 
     @beartype
+    def build_loss_operands(self, trns_batch: dict[str, torch.Tensor]):
+
+        with torch.no_grad():
+            # define inputs
+            state = trns_batch["obs0"]
+            action = trns_batch["acs0"]
+            next_state = trns_batch["obs1"]
+            reward = trns_batch["erews1"]
+            done = trns_batch["dones1"].float()
+            td_len = torch.ones_like(done)
+
+            if self.hps.batch_norm:
+                assert self.rms_obs is not None
+                # update the observation normalizer
+                self.rms_obs.update(state)
+
+        # compute target action
+        if self.hps.prefer_td3_over_sac:
+            # using TD3
+            if self.hps.targ_actor_smoothing:
+                n_ = action.clone().detach().normal_(0., self.hps.td3_std)
+                assert n_.device == self.device
+                n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
+                next_action = (
+                    self.targ_actr(next_state) + n_).clamp(self.min_ac, self.max_ac)
+            else:
+                next_action = self.targ_actr(next_state)
+        else:
+            # using SAC
+            next_action = self.actr.sample(next_state, stop_grad=True)
+
+        return state, action, next_state, next_action, reward, done, td_len
+
+    @beartype
     def compute_losses(self,
                        state: torch.Tensor,
                        action: torch.Tensor,
@@ -182,7 +216,7 @@ class Agent(object):
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Compute the critic and actor losses"""
 
-        loga_loss = None  # unused if using TD3
+        loga_loss = None  # not used if using TD3
 
         if self.hps.prefer_td3_over_sac:
             # using TD3
@@ -256,79 +290,30 @@ class Agent(object):
         return actr_loss, crit_loss, twin_loss, loga_loss
 
     @beartype
-    def update_actr_crit(self,
-                         trns_batch: dict[str, torch.Tensor],
-                         *,
-                         update_actr: bool):
-        """Update the critic and the actor"""
+    def update_actr(self, actr_loss: torch.Tensor, loga_loss: Optional[torch.Tensor]):
 
-        with torch.no_grad():
-            # define inputs
-            state = trns_batch["obs0"]
-            action = trns_batch["acs0"]
-            next_state = trns_batch["obs1"]
-            reward = trns_batch["erews1"]
-            done = trns_batch["dones1"].float()
-            td_len = torch.ones_like(done)
+        # update actor
+        self.actr_opt.zero_grad()
+        actr_loss = self.actr_sclr.scale(actr_loss)
+        actr_loss.backward()
+        if self.hps.clip_norm > 0:
+            self.actr_sclr.unscale_(self.actr_opt)
+            cg.clip_grad_norm_(self.actr.parameters(), self.hps.clip_norm)
+        self.actr_sclr.step(self.actr_opt)
+        self.actr_sclr.update()
 
-            if self.hps.batch_norm:
-                assert self.rms_obs is not None
-                # update the observation normalizer
-                self.rms_obs.update(state)
+        if loga_loss is not None:
+            # update log(alpha), and therefore alpha
+            assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
+            self.loga_opt.zero_grad()
+            loga_loss = self.loga_sclr.scale(loga_loss)
+            assert loga_loss is not None
+            loga_loss.backward()
+            self.loga_sclr.step(self.loga_opt)
+            self.loga_sclr.update()
 
-        # compute target action
-        if self.hps.prefer_td3_over_sac:
-            # using TD3
-            if self.hps.targ_actor_smoothing:
-                n_ = action.clone().detach().normal_(0., self.hps.td3_std)
-                assert n_.device == self.device
-                n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
-                next_action = (
-                    self.targ_actr(next_state) + n_).clamp(self.min_ac, self.max_ac)
-            else:
-                next_action = self.targ_actr(next_state)
-        else:
-            # using SAC
-            next_action = self.actr.sample(next_state, stop_grad=True)
-
-        # compute critic and actor losses
-        with self.ctx:
-            actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
-                state, action, next_state, next_action, reward, done, td_len)
-
-        if update_actr:
-
-            # update actor
-            self.actr_opt.zero_grad()
-            actr_loss = self.actr_sclr.scale(actr_loss)
-            actr_loss.backward()
-            if self.hps.clip_norm > 0:
-                self.actr_sclr.unscale_(self.actr_opt)
-                cg.clip_grad_norm_(self.actr.parameters(), self.hps.clip_norm)
-            self.actr_sclr.step(self.actr_opt)
-            self.actr_sclr.update()
-
-            self.actr_updates_so_far += 1
-
-            if loga_loss is not None:
-                # update log(alpha), and therefore alpha
-                assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
-                self.loga_opt.zero_grad()
-                loga_loss = self.loga_sclr.scale(loga_loss)
-                loga_loss.backward()
-                self.loga_sclr.step(self.loga_opt)
-                self.loga_sclr.update()
-
-            if (nups := self.actr_updates_so_far) % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-                wandb_dict = {"loss/actr_loss": actr_loss.numpy(force=True),
-                              "nups/actr_updates_so_far": nups}
-                if not self.hps.prefer_td3_over_sac:
-                    # using SAC
-                    assert self.alpha is not None
-                    wandb_dict.update({"vitals/alpha": self.alpha.numpy(force=True)})
-                    if loga_loss is not None:
-                        wandb_dict.update({"loss/loga_loss": loga_loss.numpy(force=True)})
-                wandb.log(wandb_dict, step=self.timesteps_so_far)
+    @beartype
+    def update_crit(self, crit_loss: torch.Tensor, twin_loss: torch.Tensor):
 
         # update critic
         self.crit_opt.zero_grad()
@@ -336,50 +321,37 @@ class Agent(object):
         crit_loss.backward()
         self.crit_sclr.step(self.crit_opt)
         self.crit_sclr.update()
-        if twin_loss is not None:
-            # update twin
-            self.twin_opt.zero_grad()
-            twin_loss = self.twin_sclr.scale(twin_loss)
-            twin_loss.backward()
-            self.twin_sclr.step(self.twin_opt)
-            self.twin_sclr.update()
-
-        self.crit_updates_so_far += 1
-
-        if (nups := self.crit_updates_so_far) % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-            wandb_dict = {"loss/crit_loss": crit_loss.numpy(force=True),
-                          "nups/crit_updates_so_far": nups}
-            if twin_loss is not None:
-                wandb_dict.update({"loss/twin_loss": twin_loss.numpy(force=True)})
-            wandb.log(wandb_dict, step=self.timesteps_so_far)
-
-        # update target nets
-        if (self.hps.prefer_td3_over_sac or (
-            self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0)):
-            self.update_target_net()
+        # update twin
+        self.twin_opt.zero_grad()
+        twin_loss = self.twin_sclr.scale(twin_loss)
+        twin_loss.backward()
+        self.twin_sclr.step(self.twin_opt)
+        self.twin_sclr.update()
 
     @beartype
-    def update_target_net(self):
-        """Update the target networks"""
+    def update_targ_nets(self):
 
-        with torch.no_grad():
-            if self.hps.prefer_td3_over_sac:
-                # using TD3 (SAC does not use a target actor)
-                for param, targ_param in zip(self.actr.parameters(),
-                                             self.targ_actr.parameters()):
+        if (self.hps.prefer_td3_over_sac or (
+            self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0)):
+
+            with torch.no_grad():
+                if self.hps.prefer_td3_over_sac:
+                    # using TD3 (SAC does not use a target actor)
+                    for param, targ_param in zip(self.actr.parameters(),
+                                                 self.targ_actr.parameters()):
+                        new_param = self.hps.polyak * param
+                        new_param += (1. - self.hps.polyak) * targ_param
+                        targ_param.copy_(new_param)
+                for param, targ_param in zip(self.crit.parameters(),
+                                             self.targ_crit.parameters()):
                     new_param = self.hps.polyak * param
                     new_param += (1. - self.hps.polyak) * targ_param
                     targ_param.copy_(new_param)
-            for param, targ_param in zip(self.crit.parameters(),
-                                         self.targ_crit.parameters()):
-                new_param = self.hps.polyak * param
-                new_param += (1. - self.hps.polyak) * targ_param
-                targ_param.copy_(new_param)
-            for param, targ_param in zip(self.twin.parameters(),
-                                         self.targ_twin.parameters()):
-                new_param = self.hps.polyak * param
-                new_param += (1. - self.hps.polyak) * targ_param
-                targ_param.copy_(new_param)
+                for param, targ_param in zip(self.twin.parameters(),
+                                             self.targ_twin.parameters()):
+                    new_param = self.hps.polyak * param
+                    new_param += (1. - self.hps.polyak) * targ_param
+                    targ_param.copy_(new_param)
 
     @beartype
     def save(self, path: Path, sfx: Optional[str] = None):
