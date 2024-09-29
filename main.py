@@ -15,7 +15,6 @@ from gymnasium.core import Env
 import orchestrator
 from helpers import logger
 from helpers.env_makers import make_env
-from agents.memory import ReplayBuffer
 from agents.agent import Agent
 
 
@@ -145,13 +144,13 @@ class MagicRunner(object):
         generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
         # envs
-        env, net_shapes, erb_shapes, min_ac, max_ac = make_env(
+        env, net_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.seed,
             sync_vec_env=self._cfg.sync_vec_env,
             num_env=self._cfg.num_env,
         )
-        eval_env, _, _, _, _ = make_env(
+        eval_env, _, _, _ = make_env(
             self._cfg.env_id,
             self._cfg.seed,
             sync_vec_env=True,
@@ -160,19 +159,11 @@ class MagicRunner(object):
         )
 
         # agent
-        rb = TensorDictReplayBuffer(storage=LazyTensorStorage(self._cfg.rb_capacity, device=device))
-
-        # replay_buffers = [ReplayBuffer(
-        #     generator=generator,
-        #     capacity=self._cfg.rbx_capacity,
-        #     erb_shapes=erb_shapes,
-        #     device=device,
-        # ) for _ in range(self._cfg.num_env)]
-        # for i, rb in enumerate(replay_buffers):
-        #     logger.info(f"rb#{i} [{rb}] is set")
-        #
-        # # perform quick sanity check on a ring buffer data structure
-        # replay_buffers[0].ring_buffers["acs0"].sanity_check_ringbuffer()
+        rb = TensorDictReplayBuffer(
+            storage=LazyTensorStorage(
+                self._cfg.rb_capacity, device=device,
+            ),
+        )
 
         @beartype
         def agent_wrapper() -> Agent:
@@ -220,7 +211,7 @@ class MagicRunner(object):
         generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
         # env
-        env, net_shapes, _, min_ac, max_ac = make_env(
+        env, net_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.seed,
             sync_vec_env=True,

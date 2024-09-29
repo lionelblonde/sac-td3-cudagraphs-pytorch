@@ -84,7 +84,6 @@ def make_env(env_id: str,
              horizon: Optional[int] = None,
     ) -> (tuple[Union[SyncVectorEnv, AsyncVectorEnv],
           dict[str, tuple[int, ...]],
-          dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
 
@@ -109,7 +108,6 @@ def make_farama_mujoco_env(env_id: str,
                            video_path: Optional[Path] = None,
                            horizon: Optional[int] = None,
     ) -> (tuple[Union[SyncVectorEnv, AsyncVectorEnv],
-          dict[str, tuple[int, ...]],
           dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
@@ -136,9 +134,6 @@ def make_farama_mujoco_env(env_id: str,
         ],
     )
 
-    net_shapes = {}
-    erb_shapes = {}
-
     # due diligence checks
     ob_space = env.observation_space
     assert isinstance(ob_space, gym.spaces.Box)
@@ -146,21 +141,10 @@ def make_farama_mujoco_env(env_id: str,
     if isinstance(ac_space, gym.spaces.Discrete):
         raise TypeError("actions must be continuous")
     assert isinstance(ac_space, gym.spaces.Box)
-
-    ob_shape = ob_space.shape
-    ac_shape = ac_space.shape
-
-    net_shapes.update({"ob_shape": ob_shape, "ac_shape": ac_shape})
-    erb_shapes.update({
-        "obs0": (ob_shape[-1],),
-        "acs0": (ac_shape[-1],),
-        "obs1": (ob_shape[-1],),
-        "erews1": (1,),
-        "dones1": (1,),
-    })
+    net_shapes = {"ob_shape": ob_space.shape, "ac_shape": ac_space.shape}
 
     # assert that all envs have the same action bounds
     assert np.all(ac_space.low == ac_space.low[0])
     assert np.all(ac_space.high == ac_space.high[0])
 
-    return env, net_shapes, erb_shapes, ac_space.low[0], ac_space.high[0]
+    return env, net_shapes, ac_space.low[0], ac_space.high[0]
