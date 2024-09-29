@@ -133,15 +133,15 @@ class Spawner(object):
         # also use the bundle name to determine the GPU memory to request
         self.gpu_memory = GPU_MEM_MAP[env_bundle]
 
-    @beartype
     @staticmethod
+    @beartype
     def copy_and_add_seed(hpmap: dict[str, Any], seed: int) -> dict[str, Any]:
         hpmap_ = deepcopy(hpmap)
         hpmap_.update({"seed": seed})
         return hpmap_
 
-    @beartype
     @staticmethod
+    @beartype
     def copy_and_add_env(hpmap: dict[str, Any], env: str) -> dict[str, Any]:
         hpmap_ = deepcopy(hpmap)
         hpmap_.update({"env_id": env})
@@ -182,8 +182,8 @@ class Spawner(object):
 
         return hpmaps
 
-    @beartype
     @staticmethod
+    @beartype
     def unroll_options(hpmap: dict[str, Any]) -> str:
         """Transform the dictionary of hyperparameters into a string of bash options"""
         arguments = ""
@@ -293,7 +293,8 @@ def run(cfg: str,
         hpmaps = spawner.get_hps()
 
     # create associated task strings
-    commands = [f"python main.py train{spawner.unroll_options(hpmap)}" for hpmap in hpmaps]
+    commands = [f"python -O main.py train{spawner.unroll_options(hpmap)}" for hpmap in hpmaps]
+    # N.B.: the `-O` option is very important: beartype sees __debug__ is turns itself off
     if not len(commands) == len(set(commands)):
         # terminate in case of duplicate experiment (extremely unlikely though)
         raise ValueError("bad luck, there are dupes -> try again (:")
