@@ -357,14 +357,15 @@ def train(cfg: DictConfig,
             actor_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
             # update the online networks
             if not cfg.actor_update_delay or bool(agent.qnet_updates_so_far % 2):
-                agent.update_actor(actor_loss, loga_loss)
-                agent.actor_updates_so_far += 1
+                agent.update_actor(actor_loss)
                 tlog.update(
                     {
                         "loss/actor": actor_loss,
                     },
                 )
+                agent.actor_updates_so_far += 1
                 if loga_loss is not None:
+                    agent.update_alpha(loga_loss)
                     tlog.update(
                         {
                             "loss/loga": loga_loss,

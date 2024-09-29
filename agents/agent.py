@@ -126,7 +126,7 @@ class Agent(object):
         log_module_info(self.qnet2)
 
     @beartype
-    def batched_qf(self, params: Module,
+    def batched_qf(self, params: TensorDict,
                    ob: torch.Tensor,
                    action: torch.Tensor,
                    next_q_value: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -138,7 +138,7 @@ class Agent(object):
             return vals
 
     @beartype
-    def pi(self, params: Module, ob: torch.Tensor) -> torch.Tensor:
+    def pi(self, params: TensorDict, ob: torch.Tensor) -> torch.Tensor:
         """Use an actor network from params"""
         with params.to_module(self.actor):
             return self.actor(ob)
@@ -307,18 +307,17 @@ class Agent(object):
         return actor_loss, qf_loss, loga_loss
 
     @beartype
-    def update_actor(self, actor_loss: torch.Tensor, loga_loss: Optional[torch.Tensor]):
-
+    def update_actor(self, actor_loss: torch.Tensor):
         actor_loss.backward()
         if self.hps.clip_norm > 0:
             cg.clip_grad_norm_(self.actor.parameters(), self.hps.clip_norm)
         self.actor_optimizer.step()
 
-        if loga_loss is not None:
-            # update alpha
-            assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
-            loga_loss.backward()
-            self.loga_opt.step()
+    @beartype
+    def update_alpha(self, loga_loss: torch.Tensor):
+        assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
+        loga_loss.backward()
+        self.loga_opt.step()
 
     @beartype
     def update_crit(self, qf_loss: torch.Tensor):
