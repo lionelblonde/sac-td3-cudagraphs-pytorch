@@ -75,8 +75,8 @@ class MagicRunner(object):
         logger.info(OmegaConf.to_yaml(self._cfg))
 
         self._cfg.root = str(proj_root)  # in config: used by wandb
-        for k in ("checkpoints", "logs", "videos", "rolls"):
-            new_k = f"{k[:-1]}_dir"
+        for k in ("checkpoint", "log", "video", "trajectory"):
+            new_k = f"{k}_dir"
             self._cfg[new_k] = str(proj_root / k)  # for yml saving
 
         # set only if nonexistant key in cfg

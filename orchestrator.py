@@ -25,15 +25,13 @@ from agents.agent import Agent
 
 
 @beartype
-def save_dict_h5py(save_dir: Path, name: str, data: dict[str, np.ndarray]):
+def save_dict_h5py(fname: Union[str, Path], data: dict[str, np.ndarray]):
     """Save dictionary containing numpy objects to h5py file."""
     for k, v in data.items():
         assert isinstance(v, (np.ndarray, np.floating, np.integer)), f"dict['{k}']: wrong type"
-    fname = save_dir / Path(f"{name}.h5")
     with h5py.File(fname, "w") as hf:
         for key in data:
             hf.create_dataset(key, data=data[key])
-    logger.warn(f"episode gathered on filesystem @:\n{fname}")
     # before leaving, sanity check whether saving was a success
     data, stts = load_dict_h5py(fname)
     for k, v in (data | stts).items():  # Python 3.9 introduced "|" op for merging dicts
@@ -499,10 +497,10 @@ def evaluate(cfg: DictConfig,
 
     assert isinstance(cfg, DictConfig)
 
-    rol_dir = None
+    trajectory_path = None
     if cfg.gather_trajectories:
-        rol_dir = Path(cfg.roll_dir) / name
-        rol_dir.mkdir(parents=True, exist_ok=True)
+        trajectory_path = Path(cfg.trajectory_dir) / name
+        trajectory_path.mkdir(parents=True, exist_ok=True)
 
     agent = agent_wrapper()
 
@@ -511,19 +509,23 @@ def evaluate(cfg: DictConfig,
     # create episode generator
     ep_gen = episode(env, agent, device, cfg.seed)
 
+    pbar = tqdm.tqdm(range(cfg.num_episodes))
+    pbar.set_description("evaluating")
+
     len_buff = []
     ret_buff = []
 
-    for i in range(n := cfg.num_episodes):
-
-        logger.warn(f"EVAL [{str(i + 1).zfill(3)}/{str(n).zfill(3)}]")
+    for i in pbar:
 
         ep = next(ep_gen)
         len_buff.append(ep_len := ep["ep_len"])
         ret_buff.append(ep_ret := ep["ep_ret"])
 
-        if rol_dir is not None:
-            save_dict_h5py(rol_dir, f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}", ep)
+        if trajectory_path is not None:
+            name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
+            save_dict_h5py(trajectory_path / f"{name}.h5", ep)
+
+    logger.warn(f"saved trajectories @: {trajectory_path}")
 
     with torch.no_grad():
         eval_metrics = {
