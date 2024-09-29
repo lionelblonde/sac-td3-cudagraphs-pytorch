@@ -7,7 +7,6 @@ from beartype import beartype
 import fire
 from omegaconf import OmegaConf, DictConfig
 import random
-import numpy as np
 import torch
 
 from gymnasium.core import Env
@@ -145,6 +144,7 @@ class MagicRunner(object):
 
         # seed
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
+        generator = torch.Generator(device).manual_seed(self._cfg.seed)
         torch.manual_seed(self._cfg.seed)
 
         # env
@@ -162,7 +162,7 @@ class MagicRunner(object):
         # create an agent wrapper
 
         replay_buffers = [ReplayBuffer(
-            generator=torch.Generator(device).manual_seed(self._cfg.seed),
+            generator=generator,
             capacity=self._cfg.rbx_capacity,
             erb_shapes=erb_shapes,
             device=device,
@@ -181,7 +181,7 @@ class MagicRunner(object):
                 max_ac=max_ac,
                 device=device,
                 hps=self._cfg,
-                actr_noise_rng=torch.Generator(device).manual_seed(self._cfg.seed),
+                generator=generator,
                 replay_buffers=replay_buffers,
             )
 
@@ -227,6 +227,7 @@ class MagicRunner(object):
 
         # seed
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
+        generator = torch.Generator(device).manual_seed(self._cfg.seed)
         torch.manual_seed(self._cfg.seed)
 
         # env
@@ -249,7 +250,7 @@ class MagicRunner(object):
                 max_ac=max_ac,
                 device=device,
                 hps=self._cfg,
-                actr_noise_rng=torch.Generator(device).manual_seed(self._cfg.seed),
+                generator=generator,
                 replay_buffers=None,
             )
 
