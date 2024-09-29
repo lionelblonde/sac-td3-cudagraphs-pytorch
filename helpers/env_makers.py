@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 
 from beartype import beartype
 import numpy as np
@@ -9,8 +9,6 @@ from gymnasium.wrappers.time_limit import TimeLimit
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from gymnasium.vector.sync_vector_env import SyncVectorEnv
 from gymnasium.vector.async_vector_env import AsyncVectorEnv
-
-from helpers import logger
 
 
 # Farama Foundation Gymnasium MuJoCo
@@ -75,16 +73,12 @@ def get_benchmark(env_id: str):
 
 
 @beartype
-def make_env(
-    env_id: str,
-    horizon: int,
-    seed: int,
-    *,
-    vectorized: bool,
-    multi_proc: bool,
-    num_env: Optional[int] = None,
-    record: bool,
-    render: bool,
+def make_env(env_id: str,
+             seed: int,
+             *,
+             sync_vec_env: bool,
+             num_env: int,
+             capture_video: bool,
     ) -> tuple[Union[Env, AsyncVectorEnv],
     dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], np.ndarray, np.ndarray]:
 
@@ -92,86 +86,65 @@ def make_env(
     bench = get_benchmark(env_id)  # at this point benchmark is valid
 
     if bench == "farama_mujoco":
-        return make_farama_mujoco_env(
-            env_id,
-            horizon,
-            seed,
-            vectorized=vectorized,
-            multi_proc=multi_proc,
-            num_env=num_env,
-            record=record,
-            render=render,
-        )
+        return make_farama_mujoco_env(env_id,
+                                      seed,
+                                      sync_vec_env=sync_vec_env,
+                                      num_env=num_env,
+                                      capture_video=capture_video)
     raise ValueError(f"invalid benchmark: {bench}")
 
 
 @beartype
-def make_farama_mujoco_env(
-    env_id: str,
-    horizon: int,
-    seed: int,
-    *,
-    vectorized: bool,
-    multi_proc: bool,
-    num_env: Optional[int],
-    record: bool,
-    render: bool,
-    ) -> tuple[Union[Env, AsyncVectorEnv],
+def make_farama_mujoco_env(env_id: str,
+                           seed: int,
+                           *,
+                           sync_vec_env: bool,
+                           num_env: int,
+                           capture_video: bool,
+                           horizon: Optional[int] = None,
+    ) -> tuple[Union[SyncVectorEnv, AsyncVectorEnv],
     dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], np.ndarray, np.ndarray]:
 
-    # not ideal for code golf, but clearer for debug
-
-    assert sum([record, vectorized]) <= 1, "not both same time"
-    assert sum([render, vectorized]) <= 1, "not both same time"
-    assert (not vectorized) or (num_env is not None), "must give num_envs when vectorized"
-
-    def thunk(*, render_mode: Optional[str] = None):
-        env = gym.make(env_id, render_mode=render_mode)
-        env = RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
-        return env
+    def make_env(*, render_mode: Optional[str] = None) -> Callable[[], Env]:
+        def thunk() -> Env:
+            if render_mode is not None:
+                env = gym.make(env_id, render_mode=render_mode)
+            else:
+                env = gym.make(env_id)
+            env = RecordEpisodeStatistics(env)
+            env.action_space.seed(seed)
+            if horizon is not None:
+                env = TimeLimit(env, max_episode_steps=horizon)
+            return env
+        return thunk
 
     # create env
-    # normally the windowed one is "human" .other option for later: "rgb_array", but prefer:
-    # the following: `from gymnasium.wrappers.pixel_observation import PixelObservationWrapper`
-    if record:  # overwrites render
-        # assert horizon is not None
-        # env = gym.make(env_id, render_mode="rgb_array")
-        env = thunk(render_mode="rgb_array")
-        # env = TimeLimit(gym.make(env_id, render_mode="rgb_array"), max_episode_steps=horizon)
-    elif render:
-        # assert horizon is not None
-        # env = gym.make(env_id, render_mode="human")
-        env = thunk(render_mode="human")
-        # env = TimeLimit(gym.make(env_id, render_mode="human"), max_episode_steps=horizon)
-    elif vectorized:
-        assert num_env is not None
-        # assert horizon is not None
-        env = (AsyncVectorEnv if multi_proc else SyncVectorEnv)([
-            lambda: thunk()
-            # lambda: TimeLimit(gym.make(env_id), max_episode_steps=horizon)
-            for _ in range(num_env)
-        ])
-        assert isinstance(env, (AsyncVectorEnv, SyncVectorEnv))
-        logger.info("using vectorized envs")
+    if capture_video:
+        env = make_env(render_mode="rgb_array")
+        # env = RecordVideo(env, f"videos/{run_name}")
+        env = SyncVectorEnv([env])
     else:
-        # assert horizon is not None
-        # env = gym.make(env_id)
-        env = thunk()
-        # env = TimeLimit(gym.make(env_id), max_episode_steps=horizon)
+        env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
+            [
+                make_env() for _ in range(num_env)
+            ],
+        )
 
-    # build shapes for nets and replay buffer
     net_shapes = {}
     erb_shapes = {}
 
+    # observations
     ob_space = env.observation_space
-    assert isinstance(ob_space, gym.spaces.Box)  # for due diligence
+    assert isinstance(ob_space, gym.spaces.Box)
     ob_shape = ob_space.shape
     assert ob_shape is not None
-    ac_space = env.action_space  # used now and later to get max action
+
+    # actions
+    ac_space = env.action_space
     if isinstance(ac_space, gym.spaces.Discrete):
         raise TypeError(f"env ({env}) is discrete: out of scope here")
-    assert isinstance(ac_space, gym.spaces.Box)  # to ensure `high` and `low` exist
+    assert isinstance(ac_space, gym.spaces.Box)
+
     ac_shape = ac_space.shape
     assert ac_shape is not None
     net_shapes.update({"ob_shape": ob_shape, "ac_shape": ac_shape})
@@ -183,7 +156,12 @@ def make_farama_mujoco_env(
         "erews1": (1,),
         "dones1": (1,),
     })
+
     min_ac, max_ac = ac_space.low, ac_space.high
-    if vectorized:  # all envs have the same ac bounds
-        min_ac, max_ac = ac_space.low[0], ac_space.high[0]
+    # assert that all envs have the same action bounds
+    assert np.all(min_ac == min_ac[0])
+    assert np.all(max_ac == max_ac[0])
+    # replace them with the bounds of the first env
+    min_ac, max_ac = ac_space.low[0], ac_space.high[0]
+
     return env, net_shapes, erb_shapes, min_ac, max_ac

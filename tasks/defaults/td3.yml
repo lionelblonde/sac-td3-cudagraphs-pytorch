@@ -2,10 +2,8 @@
 cuda: true
 
 # env
-vectorized: true
-multi_proc: true
-numenv: 8
-horizon: 1000
+sync_vec_env: true
+num_env: 8
 action_repeat: 1
 
 # logging
@@ -21,9 +19,8 @@ eval_every: 2000
 
 # evaluation mode
 num_episodes: 10
-render: false
 gather: false
-record: false
+capture_video: false
 
 # model
 batch_norm: true

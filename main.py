@@ -100,7 +100,6 @@ class MagicRunner(object):
         self.name = get_name(self._cfg.uuid, self._cfg.env_id, self._cfg.seed)
 
         # slight overwrite for consistency, before setting to read-only
-        self._cfg.num_env = self._cfg.numenv if self._cfg.vectorized else 1
         if self._cfg.num_env > 1:
             assert self._cfg.batch_size >= self._cfg.num_env
             # override batch size to preserve batch size in cfg
@@ -146,13 +145,18 @@ class MagicRunner(object):
         # env
         env, net_shapes, erb_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
-            self._cfg.horizon,
             self._cfg.seed,
-            vectorized=self._cfg.vectorized,
-            multi_proc=self._cfg.multi_proc,
+            sync_vec_env=self._cfg.sync_vec_env,
             num_env=self._cfg.num_env,
-            record=False,
-            render=self._cfg.render,
+            capture_video=False,
+        )
+        # eval env
+        eval_env, _, _, _, _ = make_env(
+            self._cfg.env_id,
+            self._cfg.seed,
+            sync_vec_env=True,
+            num_env=1,
+            capture_video=self._cfg.capture_video,
         )
 
         # create an agent wrapper
@@ -180,19 +184,6 @@ class MagicRunner(object):
                 generator=generator,
                 replay_buffers=replay_buffers,
             )
-
-        # create an evaluation environment not to mess up with training rollouts
-        eval_env, _, _, _, _ = make_env(
-            self._cfg.env_id,
-            self._cfg.horizon,
-            self._cfg.seed,
-            vectorized=True,
-            multi_proc=False,
-            num_env=1,
-            record=self._cfg.record,
-            render=self._cfg.render,
-        )
-        assert isinstance(eval_env, Env), "no vecenv allowed here"
 
         # train
         orchestrator.train(
@@ -223,12 +214,10 @@ class MagicRunner(object):
         # env
         env, net_shapes, _, min_ac, max_ac = make_env(
             self._cfg.env_id,
-            self._cfg.horizon,
             self._cfg.seed,
-            vectorized=False,
-            multi_proc=False,
-            record=self._cfg.record,
-            render=self._cfg.render,
+            sync_vec_env=True,
+            num_env=1,
+            capture_video=self._cfg.capture_video,
         )
         assert isinstance(env, Env), "no vecenv allowed here"
 
