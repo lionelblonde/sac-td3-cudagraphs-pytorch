@@ -1,6 +1,5 @@
 import os
 import time
-import h5py
 import tqdm
 from pathlib import Path
 from functools import partial
@@ -16,48 +15,13 @@ import wandb
 from wandb.errors import CommError
 import numpy as np
 import torch
+from tensordict import TensorDict
 
 from gymnasium.core import Env
 from gymnasium.vector.vector_env import VectorEnv
 
 from helpers import logger
 from agents.agent import Agent
-
-
-@beartype
-def save_dict_h5py(fname: Union[str, Path], data: dict[str, np.ndarray]):
-    """Save dictionary containing numpy objects to h5py file."""
-    for k, v in data.items():
-        assert isinstance(v, (np.ndarray, np.floating, np.integer)), f"dict['{k}']: wrong type"
-    with h5py.File(fname, "w") as hf:
-        for key in data:
-            hf.create_dataset(key, data=data[key])
-    # before leaving, sanity check whether saving was a success
-    data, stts = load_dict_h5py(fname)
-    for k, v in (data | stts).items():  # Python 3.9 introduced "|" op for merging dicts
-        logger.warn(k, type(v))
-    del data, stts
-
-
-@beartype
-def load_dict_h5py(fname: Union[str, Path],
-    ) -> tuple[dict[str, np.ndarray],
-               dict[str, Union[np.floating, np.integer]]]:
-    """Restore dictionary containing numpy objects from h5py file."""
-    data, stts = {}, {}
-    with h5py.File(fname, "r") as hf:
-        for key in hf:
-            dset = hf[key]
-            if isinstance(dset, h5py.Dataset):
-                dk = dset[()]
-                assert isinstance(dk, (np.ndarray, np.floating, np.integer)), f"{type(dk) = }"
-                if isinstance(dk, (np.floating, np.integer)):
-                    stts[key] = dk
-                else:  # last option: np.ndarray
-                    data[key] = dk
-            else:
-                raise TypeError(f"dset for key {key} has wrong type")
-    return data, stts
 
 
 @beartype
@@ -390,14 +354,14 @@ def train(cfg: DictConfig,
             # assemble the loss operands
             operands = agent.build_loss_operands(trns_batch)
             # compute the losses
-            actr_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
+            actor_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
             # update the online networks
-            if not cfg.actr_update_delay or bool(agent.crit_updates_so_far % 2):
-                agent.update_actr(actr_loss, loga_loss)
-                agent.actr_updates_so_far += 1
+            if not cfg.actor_update_delay or bool(agent.qnet_updates_so_far % 2):
+                agent.update_actor(actor_loss, loga_loss)
+                agent.actor_updates_so_far += 1
                 tlog.update(
                     {
-                        "loss/actr": actr_loss,
+                        "loss/actor": actor_loss,
                     },
                 )
                 if loga_loss is not None:
@@ -408,7 +372,7 @@ def train(cfg: DictConfig,
                         },
                     )
             agent.update_crit(qf_loss)
-            agent.crit_updates_so_far += 1
+            agent.qnet_updates_so_far += 1
             tlog.update(
                 {
                     "loss/q": qf_loss,
@@ -522,9 +486,12 @@ def evaluate(cfg: DictConfig,
 
         if trajectory_path is not None:
             name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
-            save_dict_h5py(trajectory_path / f"{name}.h5", ep)
+            td = TensorDict(ep)
+            fname = trajectory_path / f"{name}.h5"
+            td.to_h5(fname)  # can then easily load with `from_h5`
 
-    logger.warn(f"saved trajectories @: {trajectory_path}")
+    if trajectory_path is not None:
+        logger.warn(f"saved trajectories @: {trajectory_path}")
 
     with torch.no_grad():
         eval_metrics = {
