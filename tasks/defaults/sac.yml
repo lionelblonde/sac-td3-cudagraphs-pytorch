@@ -1,5 +1,7 @@
 # resources
 cuda: true
+compile: true
+cudagraphs: false
 
 # env
 sync_vec_env: true
@@ -35,7 +37,7 @@ clip_norm: 0.
 segment_len: 1
 batch_size: 256
 gamma: 0.99
-rbx_capacity: 1000000
+rb_capacity: 1000000
 polyak: 0.005
 prefer_td3_over_sac: false
 bcq_style_targ_mix: false

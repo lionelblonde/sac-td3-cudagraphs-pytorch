@@ -8,6 +8,7 @@ import fire
 from omegaconf import OmegaConf, DictConfig
 import random
 import torch
+from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 
 from gymnasium.core import Env
 
@@ -99,11 +100,6 @@ class MagicRunner(object):
 
         self.name = get_name(self._cfg.uuid, self._cfg.env_id, self._cfg.seed)
 
-        if self._cfg.num_env > 1:
-            assert self._cfg.batch_size >= self._cfg.num_env
-            # override batch size to preserve batch size in cfg
-            self._cfg.batch_size //= self._cfg.num_env
-
         # set the cfg to read-only for safety
         OmegaConf.set_readonly(self._cfg, value=True)
 
@@ -164,17 +160,19 @@ class MagicRunner(object):
         )
 
         # agent
-        replay_buffers = [ReplayBuffer(
-            generator=generator,
-            capacity=self._cfg.rbx_capacity,
-            erb_shapes=erb_shapes,
-            device=device,
-        ) for _ in range(self._cfg.num_env)]
-        for i, rb in enumerate(replay_buffers):
-            logger.info(f"rb#{i} [{rb}] is set")
+        rb = TensorDictReplayBuffer(storage=LazyTensorStorage(self._cfg.rb_capacity, device=device))
 
-        # perform quick sanity check on a ring buffer data structure
-        replay_buffers[0].ring_buffers["acs0"].sanity_check_ringbuffer()
+        # replay_buffers = [ReplayBuffer(
+        #     generator=generator,
+        #     capacity=self._cfg.rbx_capacity,
+        #     erb_shapes=erb_shapes,
+        #     device=device,
+        # ) for _ in range(self._cfg.num_env)]
+        # for i, rb in enumerate(replay_buffers):
+        #     logger.info(f"rb#{i} [{rb}] is set")
+        #
+        # # perform quick sanity check on a ring buffer data structure
+        # replay_buffers[0].ring_buffers["acs0"].sanity_check_ringbuffer()
 
         @beartype
         def agent_wrapper() -> Agent:
@@ -185,7 +183,7 @@ class MagicRunner(object):
                 device=device,
                 hps=self._cfg,
                 generator=generator,
-                replay_buffers=replay_buffers,
+                rb=rb,
             )
 
         # train
@@ -241,7 +239,6 @@ class MagicRunner(object):
                 device=device,
                 hps=self._cfg,
                 generator=generator,
-                replay_buffers=None,
             )
 
         # evaluate

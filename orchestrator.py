@@ -3,7 +3,7 @@ import time
 import tqdm
 from pathlib import Path
 from functools import partial
-from typing import Union, Callable
+from typing import Union, Callable, Iterable
 from contextlib import contextmanager
 from collections import deque
 
@@ -16,6 +16,7 @@ from wandb.errors import CommError
 import numpy as np
 import torch
 from tensordict import TensorDict
+from tensordict.nn import CudaGraphModule
 
 from gymnasium.core import Env
 from gymnasium.vector.vector_env import VectorEnv
@@ -56,119 +57,137 @@ def segment(env: Union[Env, VectorEnv],
             learning_starts: int,
             action_repeat: int):
 
-    ob, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
-    ob = torch.as_tensor(ob, device=device, dtype=torch.float)
-    ac = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
+    obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
+    obs = torch.as_tensor(obs, device=device, dtype=torch.float)
+    actions = None  # quiets down the type-checker; as long as r is init at 0: ac will be written over
 
     t = 0
     r = 0  # action repeat reference
 
-    assert agent.replay_buffers is not None
+    assert agent.rb is not None
 
     while True:
 
         if r % action_repeat == 0:
             # predict action
             if agent.timesteps_so_far < learning_starts:
-                ac = env.action_space.sample()
+                actions = env.action_space.sample()
             else:
-                assert isinstance(ob, torch.Tensor)
-                ac = agent.predict(ob, explore=True)
+                assert isinstance(obs, torch.Tensor)
+                actions = agent.predict(obs, explore=True)
 
         if t > 0 and t % segment_len == 0:
             yield
 
         # interact with env
-        new_ob, rew, terminated, truncated, infos = env.step(ac)
+        next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
-        ac = torch.as_tensor(ac, device=device, dtype=torch.float)
+        next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
+        real_next_obs = next_obs.clone()
+        assert not isinstance(truncations, bool)  # type-checker
+        for idx, trunc in enumerate(truncations):
+            if trunc:
+                real_next_obs[idx] = torch.as_tensor(
+                    infos["final_observation"][idx], device=device, dtype=torch.float)
 
-        new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
+        # if num_env == 1:
+        #     rew = np.array([rew])
 
-        if num_env == 1:
-            rew = np.array([rew])
-        rew = rearrange(rew, "b -> b 1")
-        rew = torch.as_tensor(rew, device=device, dtype=torch.float)
+        rewards = rearrange(rewards, "b -> b 1")
+        terminations = rearrange(terminations, "b -> b 1")
 
-        if num_env > 1:
-            logger.debug(f"{terminated=} | {truncated=}")
-            assert isinstance(terminated, np.ndarray)
-            assert isinstance(truncated, np.ndarray)
-            assert terminated.shape == truncated.shape
+        # rew = torch.as_tensor(rew, device=device, dtype=torch.float)
 
-        if num_env == 1:
-            assert isinstance(env, Env)
-            done, terminated = np.array([terminated or truncated]), np.array([terminated])
-            if truncated:
-                logger.debug("termination caused by something like time limit or out of bounds?")
-        else:
-            done = np.logical_or(terminated, truncated)  # might not be used but diagnostics
-            done, terminated = rearrange(done, "b -> b 1"), rearrange(terminated, "b -> b 1")
-            # `done` is technically not used, but this quiets down the type-checker
-        # read about what truncation means at the link below:
-        # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
+        # if num_env > 1:
+        #     logger.debug(f"{terminated=} | {truncated=}")
+        #     assert isinstance(terminated, np.ndarray)
+        #     assert isinstance(truncated, np.ndarray)
+        #     assert terminated.shape == truncated.shape
 
-        tr_or_vtr = [ob, ac, new_ob, rew, terminated]
-        # note: we use terminated as a done replacement, but keep the key "dones1"
+        # if num_env == 1:
+        #     assert isinstance(env, Env)
+        #     done, terminated = np.array([terminated or truncated]), np.array([terminated])
+        #     if truncated:
+        #         logger.debug("termination caused by something like time limit or out of bounds?")
+        # else:
+        #     done = np.logical_or(terminated, truncated)  # might not be used but diagnostics
+        #     done, terminated = rearrange(done, "b -> b 1"), rearrange(terminated, "b -> b 1")
+        #     # `done` is technically not used, but this quiets down the type-checker
+        # # read about what truncation means at the link below:
+        # # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
 
-        if num_env > 1:
-            pp_func = partial(postproc_vtr, num_env, device, infos)
-        else:
-            assert isinstance(env, Env)
-            pp_func = postproc_tr
-        outs = pp_func(tr_or_vtr)
-        assert outs is not None
-        for i, out in enumerate(outs):  # iterate over env (although maybe only one non-vec)
-            # add transition to the i-th replay buffer
-            agent.replay_buffers[i].append(out)
-            # log how filled the i-th replay buffer is
-            logger.debug(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
+        # tr_or_vtr = [ob, ac, new_ob, rew, terminated]
+        # # note: we use terminated as a done replacement, but keep the key "dones1"
 
-        # set current state with the next
-        ob = new_ob
+        tr = {
+            "observations": obs,
+            "next_observations": real_next_obs,
+            "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+            "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+            "terminations": terminations,
+            "dones": terminations,
+        }
 
-        if num_env == 1:
-            assert isinstance(env, Env)
-            if done:
-                ob, _ = env.reset()
+        td = TensorDict(tr, batch_size=obs.shape[0], device=device)
+
+        agent.rb.extend(td)
+
+
+
+        # if num_env > 1:
+        #     pp_func = partial(postproc_vtr, num_env, device, infos)
+        # else:
+        #     assert isinstance(env, Env)
+        #     pp_func = postproc_tr
+        # outs = pp_func(tr_or_vtr)
+        # assert outs is not None
+        # for i, out in enumerate(outs):  # iterate over env (although maybe only one non-vec)
+        #     # add transition to the i-th replay buffer
+        #     agent.replay_buffers[i].append(out)
+        #     # log how filled the i-th replay buffer is
+        #     logger.debug(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
+
+
+
+        obs = next_obs
 
         t += 1
         r += 1
 
 
-@beartype
-def postproc_vtr(num_envs: int,
-                 device: torch.device,
-                 infos: dict[str, np.ndarray],
-                 vtr: list[Union[np.ndarray, torch.Tensor]],
-    ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
-    # N.B.: for the num of envs and the workloads, serial treatment is faster than parallel
-    # time it takes for the main process to spawn X threads is too much overhead
-    # it starts becoming interesting if the post-processing is heavier though
-    outs = []
-    for i in range(num_envs):
-        tr = [e[i] for e in vtr]
-        if "final_observation" in infos:
-            if bool(infos["_final_observation"][i]):
-                ob, ac, _, rew, terminated = tr
-                logger.debug("writing over new_ob with info[final_observation]")
-                real_new_ob = torch.as_tensor(
-                    infos["final_observation"][i], device=device, dtype=torch.float)
-                tr = [ob, ac, real_new_ob, rew, terminated]  # override `new_ob`
-        outs.extend(postproc_tr(tr))
-    return outs
-
-
-@beartype
-def postproc_tr(tr: list[Union[np.ndarray, torch.Tensor]],
-    ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
-    ob, ac, new_ob, rew, terminated = tr
-    return [
-        {"obs0": ob,
-         "acs0": ac,
-         "obs1": new_ob,
-         "erews1": rew,
-         "dones1": terminated}]
+# @beartype
+# def postproc_vtr(num_envs: int,
+#                  device: torch.device,
+#                  infos: dict[str, np.ndarray],
+#                  vtr: list[Union[np.ndarray, torch.Tensor]],
+#     ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
+#     # N.B.: for the num of envs and the workloads, serial treatment is faster than parallel
+#     # time it takes for the main process to spawn X threads is too much overhead
+#     # it starts becoming interesting if the post-processing is heavier though
+#     outs = []
+#     for i in range(num_envs):
+#         tr = [e[i] for e in vtr]
+#         if "final_observation" in infos:
+#             if bool(infos["_final_observation"][i]):
+#                 ob, ac, _, rew, terminated = tr
+#                 logger.debug("writing over new_ob with info[final_observation]")
+#                 real_new_ob = torch.as_tensor(
+#                     infos["final_observation"][i], device=device, dtype=torch.float)
+#                 tr = [ob, ac, real_new_ob, rew, terminated]  # override `new_ob`
+#         outs.extend(postproc_tr(tr))
+#     return outs
+#
+#
+# @beartype
+# def postproc_tr(tr: list[Union[np.ndarray, torch.Tensor]],
+#     ) -> list[dict[str, Union[np.ndarray, torch.Tensor]]]:
+#     ob, ac, new_ob, rew, terminated = tr
+#     return [
+#         {"obs0": ob,
+#          "acs0": ac,
+#          "obs1": new_ob,
+#          "erews1": rew,
+#          "dones1": terminated}]
 
 
 @beartype
@@ -221,8 +240,8 @@ def episode(env: Env,
         if "final_info" in infos:
             assert len(infos["final_info"]) == 1
             for info in infos["final_info"]:
-                ep_len = float(info["episode"]["l"])
-                ep_ret = float(info["episode"]["r"])
+                ep_len = float(info["episode"]["l"].item())
+                ep_ret = float(info["episode"]["r"].item())
 
             obs0 = np.array(obs0)
             acs0 = np.array(acs0)
@@ -328,6 +347,16 @@ def train(cfg: DictConfig,
     len_buff = deque(maxlen=maxlen)
     ret_buff = deque(maxlen=maxlen)
 
+    mode = None
+    tc_update_actor = agent.update_actor
+    tc_update_qnets = agent.update_qnets
+    if cfg.compile:
+        tc_update_actor = torch.compile(tc_update_actor, mode=mode)
+        tc_update_qnets = torch.compile(tc_update_qnets, mode=mode)
+    if cfg.cudagraphs:
+        tc_update_actor = CudaGraphModule(tc_update_actor, in_keys=[], out_keys=[])
+        tc_update_qnets = CudaGraphModule(tc_update_qnets, in_keys=[], out_keys=[])
+
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
         if ((agent.timesteps_so_far >= (cfg.measure_burnin + cfg.learning_starts) and
@@ -350,14 +379,14 @@ def train(cfg: DictConfig,
         logger.info(("train").upper())
         for _ in range(cfg.training_steps_per_iter):
             # sample a batch of transitions
-            trns_batch = agent.sample_trns_batch()
+            trns_batch = agent.sample_batch()
             # assemble the loss operands
             operands = agent.build_loss_operands(trns_batch)
             # compute the losses
             actor_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
             # update the online networks
             if not cfg.actor_update_delay or bool(agent.qnet_updates_so_far % 2):
-                agent.update_actor(actor_loss)
+                tc_update_actor(actor_loss)
                 tlog.update(
                     {
                         "loss/actor": actor_loss,
@@ -372,7 +401,7 @@ def train(cfg: DictConfig,
                             "vitals/alpha": agent.alpha,
                         },
                     )
-            agent.update_crit(qf_loss)
+            tc_update_qnets(qf_loss)
             agent.qnet_updates_so_far += 1
             tlog.update(
                 {

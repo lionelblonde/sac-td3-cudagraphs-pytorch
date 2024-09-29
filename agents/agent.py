@@ -11,15 +11,14 @@ import numpy as np
 import torch
 import torch.special
 from torch.optim import Adam
-from torch.nn import Module
 from torch.nn import functional as ff
 from torch.nn.utils import clip_grad as cg
 from tensordict import TensorDict
+from torchrl.data import ReplayBuffer
 
 from helpers import logger
 from helpers.normalizer import RunningMoments
 from agents.nets import log_module_info, Actor, TanhGaussActor, Critic
-from agents.memory import ReplayBuffer
 
 
 class Agent(object):
@@ -32,7 +31,7 @@ class Agent(object):
                  device: torch.device,
                  hps: DictConfig,
                  generator: torch.Generator,
-                 replay_buffers: Optional[list[ReplayBuffer]]):
+                 rb: Optional[ReplayBuffer] = None):
         self.ob_shape, self.ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
 
         self.device = device
@@ -54,7 +53,7 @@ class Agent(object):
             logger.info("clip_norm <= 0, hence disabled")
 
         # replay buffer
-        self.replay_buffers = replay_buffers
+        self.rb = rb
 
         self.rms_obs = None
         if self.hps.batch_norm:
@@ -104,10 +103,12 @@ class Agent(object):
 
         self.q_optimizer = Adam(
             self.qnet.parameters(),
-            lr=self.hps.crit_lr)  # capturable=args.cudagraphs and not args.compile)
+            lr=self.hps.crit_lr,
+            capturable=self.hps.cudagraphs and not self.hps.compile)
         self.actor_optimizer = Adam(
             list(self.actor.parameters()),
-            lr=self.hps.actor_lr)  # capturable=args.cudagraphs and not args.compile)
+            lr=self.hps.actor_lr,
+            capturable=self.hps.cudagraphs and not self.hps.compile)
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
@@ -143,26 +144,30 @@ class Agent(object):
         with params.to_module(self.actor):
             return self.actor(ob)
 
-    @beartype
     @property
+    @beartype
     def alpha(self) -> Optional[torch.Tensor]:
         if not self.hps.prefer_td3_over_sac:
             return self.log_alpha.exp()
         return None
 
     @beartype
-    def sample_trns_batch(self) -> dict[str, torch.Tensor]:
+    def sample_batch(self) -> dict[str, torch.Tensor]:
         """Sample (a) batch(es) of transitions from the replay buffer(s)"""
-        assert self.replay_buffers is not None
 
-        batches = defaultdict(list)
-        for rb in self.replay_buffers:
-            batch = rb.sample(self.hps.batch_size)
-            for k, v in batch.items():
-                batches[k].append(v)
-        out = {}
-        for k, v in batches.items():
-            out[k], _ = pack(v, "* d")  # equiv to: rearrange(v, "n b d -> (n b) d")
+        # # assert self.replay_buffers is not None
+        # batches = defaultdict(list)
+        # for rb in self.replay_buffers:
+        #     batch = rb.sample(self.hps.batch_size)
+        #     for k, v in batch.items():
+        #         batches[k].append(v)
+        # out = {}
+        # for k, v in batches.items():
+        #     out[k], _ = pack(v, "* d")  # equiv to: rearrange(v, "n b d -> (n b) d")
+
+        assert self.rb is not None
+        out = self.rb.sample(self.hps.batch_size)
+        # print(out.size())
         return out
 
     @beartype
@@ -183,12 +188,18 @@ class Agent(object):
 
         with torch.no_grad():
             # define inputs
-            state = trns_batch["obs0"]
-            action = trns_batch["acs0"]
-            next_state = trns_batch["obs1"]
-            reward = trns_batch["erews1"]
-            done = trns_batch["dones1"].float()
+            state = trns_batch["observations"]
+            next_state = trns_batch["next_observations"]
+            action = trns_batch["actions"]
+            reward = trns_batch["rewards"]
+            done = trns_batch["dones"].float()
             td_len = torch.ones_like(done)
+
+            # print("state", state.size())
+            # print("reward", reward.size())
+            # print("td_len", td_len.size())
+            #
+            # raise ValueError()
 
             if self.hps.batch_norm:
                 assert self.rms_obs is not None
@@ -320,7 +331,7 @@ class Agent(object):
         self.loga_opt.step()
 
     @beartype
-    def update_crit(self, qf_loss: torch.Tensor):
+    def update_qnets(self, qf_loss):
         qf_loss.backward()
         self.q_optimizer.step()
 
@@ -384,8 +395,8 @@ class Agent(object):
         self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
         self.q_optimizer.load_state_dict(checkpoint["q_optimizer"])
 
-    @beartype
     @staticmethod
+    @beartype
     def compare_dictconfigs(
         dictconfig1: DictConfig,
         dictconfig2: DictConfig,
