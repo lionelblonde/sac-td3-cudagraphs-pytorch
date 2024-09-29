@@ -129,13 +129,6 @@ class MagicRunner(object):
     @beartype
     def train(self):
 
-        # mlsys
-        torch.set_num_threads(self._cfg.num_env)
-        # TODO(lionel): keep an eye on this
-
-        # set printing options
-        np.set_printoptions(precision=3)
-
         # logger
         if self.DISABLE_LOGGER:
             logger.set_level(logger.DISABLED)  # turn the logging off
@@ -144,7 +137,7 @@ class MagicRunner(object):
             log_path.mkdir(parents=True, exist_ok=True)
             logger.configure(directory=log_path, format_strs=["log", "json", "csv"])
             logger.set_level(self.LOGGER_LEVEL)
-            # config dump
+            # save config in log dir
             OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
         # device
@@ -221,12 +214,6 @@ class MagicRunner(object):
 
     @beartype
     def evaluate(self):
-
-        # mlsys
-        torch.set_num_threads(1)
-
-        # set printing options
-        np.set_printoptions(precision=3)
 
         # logger
         if self.DISABLE_LOGGER:
