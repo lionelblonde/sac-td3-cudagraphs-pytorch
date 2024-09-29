@@ -1,6 +1,6 @@
 import math
 from collections import OrderedDict
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 from contextlib import nullcontext
 
 from beartype import beartype
@@ -151,7 +151,7 @@ class Critic(nn.Module):
                  rms_obs: Optional[RunningMoments],
                  *,
                  layer_norm: bool,
-                 device: Optional[torch.device] = None):
+                 device: Optional[Union[str, torch.device]] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
@@ -201,7 +201,7 @@ class Actor(nn.Module):
                  *,
                  exploration_noise: float,
                  layer_norm: bool,
-                 device: Optional[torch.device] = None):
+                 device: Optional[Union[str, torch.device]] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
@@ -265,7 +265,7 @@ class TanhGaussActor(nn.Module):
                  *,
                  generator: torch.Generator,
                  layer_norm: bool,
-                 device: Optional[torch.device] = None):
+                 device: Optional[Union[str, torch.device]] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]

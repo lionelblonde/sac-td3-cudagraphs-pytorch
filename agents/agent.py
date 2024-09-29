@@ -13,6 +13,7 @@ import torch.special
 from torch.optim import Adam
 from torch.nn.utils import clip_grad as cg
 from torch.nn import functional as ff
+from tensordict import TensorDict
 
 from helpers import logger
 from helpers.normalizer import RunningMoments
@@ -92,20 +93,36 @@ class Agent(object):
                            "device": self.device}
         self.crit = Critic(*crit_net_args, **crit_net_kwargs)
         self.twin = Critic(*crit_net_args, **crit_net_kwargs)
-        self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs)
-        self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs)
+        # self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs)
+        # self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs)
+
+        self.qnet_params = TensorDict.from_modules(self.crit, self.twin, as_module=True)
+        assert self.qnet_params.data is not None
+        self.qnet_target = self.qnet_params.data.clone()
+        # discard params of net
+        self.qnet = Critic(*crit_net_args, layer_norm=self.hps.layer_norm, device="meta")
+        self.qnet_params.to_module(self.qnet)
 
         # initilize the target nets
         if self.hps.prefer_td3_over_sac:
             # using TD3 (SAC does not use a target actor)
             self.targ_actr.load_state_dict(self.actr.state_dict())
-        self.targ_crit.load_state_dict(self.crit.state_dict())
-        self.targ_twin.load_state_dict(self.twin.state_dict())
+        # self.targ_crit.load_state_dict(self.crit.state_dict())
+        # self.targ_twin.load_state_dict(self.twin.state_dict())
 
         # set up the optimizers
         self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actr_lr)
-        self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.crit_lr)
-        self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
+
+        # self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.crit_lr)
+        # self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
+        self.q_optimizer = Adam(
+            self.qnet.parameters(),
+            lr=self.hps.crit_lr)
+            # capturable=args.cudagraphs and not args.compile)
+        self.actor_optimizer = Adam(
+            list(self.actr.parameters()),
+            lr=self.hps.actr_lr)
+            # capturable=args.cudagraphs and not args.compile)
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
@@ -123,6 +140,15 @@ class Agent(object):
         log_module_info(self.crit)
         log_module_info(self.twin)
 
+    # TODO(lionel): beartype this
+    def batched_qf(self, params, obs, action, next_q_value=None):
+        with params.to_module(self.qnet):
+            vals = self.qnet(obs, action)
+            if next_q_value is not None:
+                return ff.mse_loss(vals.view(-1), next_q_value)
+            return vals
+
+    @beartype
     @property
     def alpha(self) -> Optional[torch.Tensor]:
         if not self.hps.prefer_td3_over_sac:
@@ -200,7 +226,7 @@ class Agent(object):
                        reward: torch.Tensor,
                        done: torch.Tensor,
                        td_len: torch.Tensor,
-        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Compute the critic and actor losses"""
 
         loga_loss = None  # not used if using TD3
@@ -229,43 +255,63 @@ class Agent(object):
             # can have a destructive effect, and that is why SAC does not allow them to flow.
 
         # compute qz estimates
-        q = self.crit(state, action)
-        twin_q = self.twin(state, action)
+        # q = self.crit(state, action)
+        # twin_q = self.twin(state, action)
 
         # compute target qz estimate and same for twin
-        q_prime = self.targ_crit(next_state, next_action)
-        twin_q_prime = self.targ_twin(next_state, next_action)
-        if self.hps.bcq_style_targ_mix:
-            # use BCQ style of target mixing: soft minimum
-            q_prime = (0.75 * torch.min(q_prime, twin_q_prime) +
-                       0.25 * torch.max(q_prime, twin_q_prime))
-        else:
-            # use TD3 style of target mixing: hard minimum
-            q_prime = torch.min(q_prime, twin_q_prime)
 
-        if not self.hps.prefer_td3_over_sac:  # only for SAC
-            assert self.alpha is not None
-            # add the causal entropy regularization term
-            next_log_prob = self.actr.logp(next_state, next_action)
-            q_prime -= self.alpha.detach() * next_log_prob
+        self.q_optimizer.zero_grad()
 
-        # assemble the Bellman target
-        targ_q = (reward + (self.hps.gamma ** td_len) * (1. - done) * q_prime)
+        with torch.no_grad():
+            # q_prime = self.targ_crit(next_state, next_action)
+            # twin_q_prime = self.targ_twin(next_state, next_action)
 
-        targ_q = targ_q.detach()
+            qf_next_target = torch.vmap(self.batched_qf, (0, None, None))(
+                self.qnet_target, next_state, next_action,
+            )
+            q_prime = qf_next_target[0]
+            twin_q_prime = qf_next_target[1]
+
+            if self.hps.bcq_style_targ_mix:
+                # use BCQ style of target mixing: soft minimum
+                q_prime = (0.75 * torch.min(q_prime, twin_q_prime) +
+                           0.25 * torch.max(q_prime, twin_q_prime))
+            else:
+                # use TD3 style of target mixing: hard minimum
+                q_prime = torch.min(q_prime, twin_q_prime)
+
+            if not self.hps.prefer_td3_over_sac:  # only for SAC
+                assert self.alpha is not None
+                # add the causal entropy regularization term
+                next_log_prob = self.actr.logp(next_state, next_action)
+                q_prime -= self.alpha.detach() * next_log_prob
+
+            # assemble the Bellman target
+            targ_q = (reward + (self.hps.gamma ** td_len) * (1. - done) * q_prime)
+            targ_q = targ_q.squeeze()
+
+        qf_a_values = torch.vmap(self.batched_qf, (0, None, None, None))(
+            self.qnet_params, state, action, targ_q,
+        )
+        qf_loss = qf_a_values.sum(0)
 
         # critic and twin losses
-        crit_loss = ff.mse_loss(q, targ_q)
-        twin_loss = ff.mse_loss(twin_q, targ_q)
+        # crit_loss = ff.mse_loss(q, targ_q)
+        # twin_loss = ff.mse_loss(twin_q, targ_q)
 
         # actor loss
+        self.actor_optimizer.zero_grad()
+
         if self.hps.prefer_td3_over_sac:
             actr_loss = -self.crit(state, action_from_actr)
         else:
             assert self.alpha is not None
-            actr_loss = (self.alpha.detach() * log_prob) - torch.min(
-                self.crit(state, action_from_actr),
-                self.twin(state, action_from_actr))
+            # min_qf_pi = torch.min(self.crit(state, action_from_actr),
+            #                       self.twin(state, action_from_actr))
+            qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
+                self.qnet_params.data, state, action_from_actr)
+            min_qf_pi = qf_pi.min(0).values
+            actr_loss = (self.alpha.detach() * log_prob) - min_qf_pi
             if not actr_loss.mean().isfinite():
                 raise ValueError("NaNs: numerically unstable arctanh func")
         actr_loss = actr_loss.mean()
@@ -274,36 +320,27 @@ class Agent(object):
             assert log_prob is not None
             loga_loss = (self.log_alpha * (-log_prob - self.targ_ent).detach()).mean()
 
-        return actr_loss, crit_loss, twin_loss, loga_loss
+        return actr_loss, qf_loss, loga_loss
 
     @beartype
     def update_actr(self, actr_loss: torch.Tensor, loga_loss: Optional[torch.Tensor]):
 
-        # update actor
-        self.actr_opt.zero_grad()
         actr_loss.backward()
         if self.hps.clip_norm > 0:
             cg.clip_grad_norm_(self.actr.parameters(), self.hps.clip_norm)
-        self.actr_opt.step()
+        self.actor_optimizer.step()
 
         if loga_loss is not None:
-            # update log(alpha), and therefore alpha
+            # update alpha
             assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
             self.loga_opt.zero_grad()
             loga_loss.backward()
             self.loga_opt.step()
 
     @beartype
-    def update_crit(self, crit_loss: torch.Tensor, twin_loss: torch.Tensor):
-
-        # update critic
-        self.crit_opt.zero_grad()
-        crit_loss.backward()
-        self.crit_opt.step()
-        # update twin
-        self.twin_opt.zero_grad()
-        twin_loss.backward()
-        self.twin_opt.step()
+    def update_crit(self, qf_loss: torch.Tensor):
+        qf_loss.backward()
+        self.q_optimizer.step()
 
     @beartype
     def update_targ_nets(self):
@@ -312,6 +349,13 @@ class Agent(object):
             self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0)):
 
             with torch.no_grad():
+                # lerp is defined as x' = x + w (y-x), which is equivalent to x' = (1-w) x + w y
+                self.qnet_target.lerp_(self.qnet_params.data, self.hps.polyak)
+
+                # if self.hps.prefer_td3_over_sac:
+                #     # using TD3 (SAC does not use a target actor)
+                #     self.targ_actr.parameters().lerp_(self.actr.parameters, self.hps.polyak)
+
                 if self.hps.prefer_td3_over_sac:
                     # using TD3 (SAC does not use a target actor)
                     for param, targ_param in zip(self.actr.parameters(),
@@ -319,16 +363,17 @@ class Agent(object):
                         new_param = self.hps.polyak * param
                         new_param += (1. - self.hps.polyak) * targ_param
                         targ_param.copy_(new_param)
-                for param, targ_param in zip(self.crit.parameters(),
-                                             self.targ_crit.parameters()):
-                    new_param = self.hps.polyak * param
-                    new_param += (1. - self.hps.polyak) * targ_param
-                    targ_param.copy_(new_param)
-                for param, targ_param in zip(self.twin.parameters(),
-                                             self.targ_twin.parameters()):
-                    new_param = self.hps.polyak * param
-                    new_param += (1. - self.hps.polyak) * targ_param
-                    targ_param.copy_(new_param)
+
+                # for param, targ_param in zip(self.crit.parameters(),
+                #                              self.targ_crit.parameters()):
+                #     new_param = self.hps.polyak * param
+                #     new_param += (1. - self.hps.polyak) * targ_param
+                #     targ_param.copy_(new_param)
+                # for param, targ_param in zip(self.twin.parameters(),
+                #                              self.targ_twin.parameters()):
+                #     new_param = self.hps.polyak * param
+                #     new_param += (1. - self.hps.polyak) * targ_param
+                #     targ_param.copy_(new_param)
 
     @beartype
     def save(self, path: Path, sfx: Optional[str] = None):
@@ -347,8 +392,7 @@ class Agent(object):
             "crit": self.crit.state_dict(),
             "twin": self.twin.state_dict(),
             "actr_opt": self.actr_opt.state_dict(),
-            "crit_opt": self.crit_opt.state_dict(),
-            "twin_opt": self.twin_opt.state_dict(),
+            "q_optimizer": self.q_optimizer.state_dict(),
         }
         if self.hps.batch_norm:
             assert self.rms_obs is not None
@@ -375,16 +419,7 @@ class Agent(object):
         self.actr.load_state_dict(checkpoint["actr"])
         self.crit.load_state_dict(checkpoint["crit"])
         self.actr_opt.load_state_dict(checkpoint["actr_opt"])
-        self.crit_opt.load_state_dict(checkpoint["crit_opt"])
-        if "twin" in checkpoint:
-            self.twin.load_state_dict(checkpoint["twin"])
-            if "twin_opt" in checkpoint:
-                self.twin_opt.load_state_dict(checkpoint["twin_opt"])
-            else:
-                logger.info("twin opt is missing from the loaded ckpt!")
-                logger.info("we move on nonetheless, from a fresh opt")
-        else:
-            raise IOError("no twin found in checkpoint ckpt file")
+        self.q_optimizer.load_state_dict(checkpoint["q_optimizer"])
 
     @beartype
     @staticmethod

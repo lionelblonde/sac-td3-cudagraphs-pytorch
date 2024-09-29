@@ -390,7 +390,7 @@ def train(cfg: DictConfig,
             # assemble the loss operands
             operands = agent.build_loss_operands(trns_batch)
             # compute the losses
-            actr_loss, crit_loss, twin_loss, loga_loss = agent.compute_losses(*operands)
+            actr_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
             # update the online networks
             if not cfg.actr_update_delay or bool(agent.crit_updates_so_far % 2):
                 agent.update_actr(actr_loss, loga_loss)
@@ -407,12 +407,11 @@ def train(cfg: DictConfig,
                             "vitals/alpha": agent.alpha,
                         },
                     )
-            agent.update_crit(crit_loss, twin_loss)
+            agent.update_crit(qf_loss)
             agent.crit_updates_so_far += 1
             tlog.update(
                 {
-                    "loss/crit": crit_loss,
-                    "loss/twin": twin_loss,
+                    "loss/q": qf_loss,
                 },
             )
             # update the target networks
