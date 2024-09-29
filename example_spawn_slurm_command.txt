@@ -1,0 +1,1 @@
+python spawner.py --cfg="tasks/defaults/sac.yml" --conda_env="ptfarama" --env_bundle="debug" --deployment="slurm" --num_seeds=1 --caliber="short" --nodeploy_now
