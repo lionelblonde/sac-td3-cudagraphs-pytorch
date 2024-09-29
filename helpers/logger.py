@@ -71,8 +71,8 @@ class HumanOutputFormat(KVWriter, SeqWriter):
         # flush the output to the file
         self.file.flush()
 
-    @beartype
     @staticmethod
+    @beartype
     def truncate(s: str) -> str:
         thres = 43
         return s[:40] + "..." if len(s) > thres else s

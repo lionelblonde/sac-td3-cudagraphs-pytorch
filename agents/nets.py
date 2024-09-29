@@ -78,24 +78,24 @@ def arctanh(x: torch.Tensor) -> torch.Tensor:
 class NormalToolkit(object):
     """Technically, multivariate normal with diagonal covariance"""
 
-    @beartype
     @staticmethod
+    @beartype
     def logp(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
         neglogp = (0.5 * ((x - mean) / std).pow(2).sum(dim=-1, keepdim=True) +
                    0.5 * math.log(2 * math.pi) +
                    std.log().sum(dim=-1, keepdim=True))
         return -neglogp
 
-    @beartype
     @staticmethod
+    @beartype
     def sample(mean: torch.Tensor, std: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
         # re-parametrization trick
         eps = torch.empty(mean.size(), device=mean.device).normal_(generator=generator)
         eps.requires_grad = False
         return mean + (std * eps)
 
-    @beartype
     @staticmethod
+    @beartype
     def mode(mean: torch.Tensor) -> torch.Tensor:
         return mean
 
@@ -103,8 +103,8 @@ class NormalToolkit(object):
 class TanhNormalToolkit(object):
     """Technically, multivariate normal with diagonal covariance"""
 
-    @beartype
     @staticmethod
+    @beartype
     def logp(x: torch.Tensor,
              mean: torch.Tensor,
              std: torch.Tensor,
@@ -119,8 +119,8 @@ class TanhNormalToolkit(object):
         logp2 = logp2.sum(dim=-1, keepdim=True)
         return logp1 - logp2
 
-    @beartype
     @staticmethod
+    @beartype
     def sample(mean: torch.Tensor,
                std: torch.Tensor,
                *,
@@ -131,8 +131,8 @@ class TanhNormalToolkit(object):
         sample = torch.tanh(sample)
         return sample * scale + bias
 
-    @beartype
     @staticmethod
+    @beartype
     def mode(mean: torch.Tensor,
              *,
              scale: torch.Tensor,
@@ -322,8 +322,8 @@ class TanhGaussActor(nn.Module):
                                           scale=self.action_scale,
                                           bias=self.action_bias)
 
-    @beartype
     @staticmethod
+    @beartype
     def bound_log_std(log_std: torch.Tensor) -> torch.Tensor:
         """Stability trick from OpenAI SpinUp / Denis Yarats"""
         log_std = torch.tanh(log_std)

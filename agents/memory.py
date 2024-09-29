@@ -46,8 +46,8 @@ class RingBuffer(object):
             # this should never happen
             raise RuntimeError
 
-    @beartype
     @property
+    @beartype
     def latest_entry_idx(self) -> int:
         return (self.start + self.length - 1) % self.maxlen
 
@@ -140,23 +140,23 @@ class ReplayBuffer(object):
             assert isinstance(new_tensor, torch.Tensor)
             self.ring_buffers[k].append(v=new_tensor)
 
-    @beartype
     @property
+    @beartype
     def latest_entry(self) -> dict[str, torch.Tensor]:
         return self.get_trns(torch.tensor(self.latest_entry_idx))
 
-    @beartype
     @property
+    @beartype
     def latest_entry_idx(self) -> int:
         return self.ring_buffers["obs0"].latest_entry_idx  # could pick any other key
 
-    @beartype
     @property
+    @beartype
     def num_entries(self) -> int:
         return len(self.ring_buffers["obs0"])  # could pick any other key
 
-    @beartype
     @property
+    @beartype
     def how_filled(self) -> str:
         num = f"{self.num_entries:,}".rjust(10)
         denomi = f"{self.capacity:,}".rjust(10)
