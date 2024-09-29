@@ -303,7 +303,11 @@ class Agent(object):
         self.actor_optimizer.zero_grad()
 
         if self.hps.prefer_td3_over_sac:
-            actr_loss = -self.crit(state, action_from_actr)
+            # actr_loss = -self.crit(state, action_from_actr)
+            qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
+                self.qnet_params.data, state, action_from_actr)
+            min_qf_pi = qf_pi[0]
+            actr_loss = -min_qf_pi
         else:
             assert self.alpha is not None
             # min_qf_pi = torch.min(self.crit(state, action_from_actr),
