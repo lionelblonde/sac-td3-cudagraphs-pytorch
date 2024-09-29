@@ -62,8 +62,6 @@ def segment(env: Union[Env, VectorEnv],
     t = 0
     r = 0  # action repeat reference
 
-    assert agent.rb is not None
-
     while True:
 
         if r % action_repeat == 0:
@@ -71,7 +69,6 @@ def segment(env: Union[Env, VectorEnv],
             if agent.timesteps_so_far < learning_starts:
                 actions = env.action_space.sample()
             else:
-                assert isinstance(obs, torch.Tensor)
                 actions = agent.predict(obs, explore=True)
 
         if t > 0 and t % segment_len == 0:
@@ -82,7 +79,6 @@ def segment(env: Union[Env, VectorEnv],
 
         next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
         real_next_obs = next_obs.clone()
-        assert not isinstance(truncations, bool)  # type-checker
         for idx, trunc in enumerate(truncations):
             if trunc:
                 real_next_obs[idx] = torch.as_tensor(
@@ -140,7 +136,6 @@ def episode(env: Env,
     while True:
 
         # predict action
-        assert isinstance(ob, torch.Tensor)
         ac = agent.predict(ob, explore=False)
 
         acs0.append(ac)
@@ -158,7 +153,7 @@ def episode(env: Env,
         ob = new_ob
 
         if "final_info" in infos:
-            assert len(infos["final_info"]) == 1
+            # we have len(infos["final_info"]) == 1
             for info in infos["final_info"]:
                 ep_len = float(info["episode"]["l"].item())
                 ep_ret = float(info["episode"]["r"].item())
@@ -372,7 +367,6 @@ def train(cfg: DictConfig,
             time_spent_eval += time.time() - eval_start
 
             if start_time is not None:
-                assert measure_burnin is not None
                 # compute the speed in steps per second
                 speed = (
                     (agent.timesteps_so_far - measure_burnin) /

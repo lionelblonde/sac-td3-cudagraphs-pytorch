@@ -8,7 +8,7 @@ import wandb
 import numpy as np
 import torch
 import torch.special
-from torch.optim import Adam
+from torch.optim.adam import Adam
 from torch.nn import functional as ff
 from torch.nn.utils import clip_grad as cg
 from tensordict import TensorDict
@@ -75,7 +75,6 @@ class Agent(object):
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
             *actor_net_args, **actor_net_kwargs, device=self.device)
         self.actor_params = TensorDict.from_module(self.actor, as_module=True)
-        assert self.actor_params.data is not None
         self.actor_target = self.actor_params.data.clone()
         # discard params of net
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
@@ -91,7 +90,6 @@ class Agent(object):
         self.qnet1 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
         self.qnet2 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
         self.qnet_params = TensorDict.from_modules(self.qnet1, self.qnet2, as_module=True)
-        assert self.qnet_params.data is not None
         self.qnet_target = self.qnet_params.data.clone()
         # discard params of net
         self.qnet = Critic(*qnet_net_args, **qnet_net_kwargs, device="meta")
@@ -125,7 +123,8 @@ class Agent(object):
         log_module_info(self.qnet2)
 
     @beartype
-    def batched_qf(self, params: TensorDict,
+    def batched_qf(self,
+                   params: TensorDict,
                    ob: torch.Tensor,
                    action: torch.Tensor,
                    next_q_value: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -152,7 +151,6 @@ class Agent(object):
     @beartype
     def sample_batch(self) -> dict[str, torch.Tensor]:
         """Sample (a) batch(es) of transitions from the replay buffer(s)"""
-        assert self.rb is not None
         return self.rb.sample(self.hps.batch_size)
 
     @beartype
@@ -181,7 +179,6 @@ class Agent(object):
             td_len = torch.ones_like(done)
 
             if self.hps.batch_norm:
-                assert self.rms_obs is not None
                 # update the observation normalizer
                 self.rms_obs.update(state)
 
@@ -192,7 +189,6 @@ class Agent(object):
             # why use `pi`: we only have a handle on the target actor parameters
             if self.hps.targ_actor_smoothing:
                 n_ = action.clone().detach().normal_(0., self.hps.td3_std)
-                assert n_.device == self.device
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
                 next_action = (pi_next_target + n_).clamp(self.min_ac, self.max_ac)
             else:
@@ -257,7 +253,6 @@ class Agent(object):
                 q_prime = qf_min
 
             if not self.hps.prefer_td3_over_sac:  # only for SAC
-                assert self.alpha is not None
                 # add the causal entropy regularization term
                 next_log_prob = self.actor.logp(next_state, next_action)
                 q_prime -= self.alpha.detach() * next_log_prob
@@ -280,7 +275,6 @@ class Agent(object):
             min_qf_pi = qf_pi[0]
             actor_loss = -min_qf_pi
         else:
-            assert self.alpha is not None
             qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
                 self.qnet_params.data, state, action_from_actor)
             min_qf_pi = qf_pi.min(0).values
@@ -290,7 +284,6 @@ class Agent(object):
         actor_loss = actor_loss.mean()
 
         if (not self.hps.prefer_td3_over_sac) and self.hps.autotune:
-            assert log_prob is not None
             self.loga_opt.zero_grad()
             loga_loss = (self.log_alpha * (-log_prob - self.targ_ent).detach()).mean()
 
@@ -305,7 +298,6 @@ class Agent(object):
 
     @beartype
     def update_alpha(self, loga_loss: torch.Tensor):
-        assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
         loga_loss.backward()
         self.loga_opt.step()
 
