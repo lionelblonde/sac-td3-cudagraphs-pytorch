@@ -115,7 +115,8 @@ class MagicRunner(object):
         if self._cfg.cuda:
             # use cuda
             assert torch.cuda.is_available()
-            torch.cuda.manual_seed_all(self._cfg.seed)
+            torch.cuda.manual_seed(self._cfg.seed)
+            torch.cuda.manual_seed_all(self._cfg.seed)  # if using multiple GPUs
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
             device = torch.device("cuda:0")
@@ -137,13 +138,11 @@ class MagicRunner(object):
         # save config in log dir
         OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
-        # device
-        device = self.setup_device()
-
-        # seed
+        # seed and device
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
-        generator = torch.Generator(device).manual_seed(self._cfg.seed)
         torch.manual_seed(self._cfg.seed)
+        device = self.setup_device()
+        generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
         # env
         env, net_shapes, erb_shapes, min_ac, max_ac = make_env(
@@ -216,13 +215,11 @@ class MagicRunner(object):
         # logger
         logger.configure(directory=None, format_strs=["stdout"])
 
-        # device
-        device = self.setup_device()
-
-        # seed
+        # seed and device
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
-        generator = torch.Generator(device).manual_seed(self._cfg.seed)
         torch.manual_seed(self._cfg.seed)
+        device = self.setup_device()
+        generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
         # env
         env, net_shapes, _, min_ac, max_ac = make_env(
