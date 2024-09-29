@@ -11,8 +11,9 @@ import numpy as np
 import torch
 import torch.special
 from torch.optim import Adam
-from torch.nn.utils import clip_grad as cg
+from torch.nn import Module
 from torch.nn import functional as ff
+from torch.nn.utils import clip_grad as cg
 from tensordict import TensorDict
 
 from helpers import logger
@@ -124,16 +125,21 @@ class Agent(object):
         log_module_info(self.qnet1)
         log_module_info(self.qnet2)
 
-    # TODO(lionel): beartype this
-    def batched_qf(self, params, ob, action, next_q_value=None):
+    @beartype
+    def batched_qf(self, params: Module,
+                   ob: torch.Tensor,
+                   action: torch.Tensor,
+                   next_q_value: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Use two qnet networks from params"""
         with params.to_module(self.qnet):
             vals = self.qnet(ob, action)
             if next_q_value is not None:
                 return ff.mse_loss(vals.view(-1), next_q_value)
             return vals
 
-    # TODO(lionel): beartype this
-    def pi(self, params, ob):
+    @beartype
+    def pi(self, params: Module, ob: torch.Tensor) -> torch.Tensor:
+        """Use an actor network from params"""
         with params.to_module(self.actor):
             return self.actor(ob)
 
@@ -193,6 +199,7 @@ class Agent(object):
         if self.hps.prefer_td3_over_sac:
             # using TD3
             pi_next_target = self.pi(self.actor_target, next_state)  # target actor
+            # why use `pi`: we only have a handle on the target actor parameters
             if self.hps.targ_actor_smoothing:
                 n_ = action.clone().detach().normal_(0., self.hps.td3_std)
                 assert n_.device == self.device
