@@ -12,7 +12,6 @@ import torch
 import torch.special
 from torch.optim import Adam
 from torch.nn.utils import clip_grad as cg
-from torch.cuda.amp import autocast, GradScaler
 from torch.nn import functional as ff
 
 from helpers import logger
@@ -44,12 +43,6 @@ class Agent(object):
         assert isinstance(hps, DictConfig)
         self.hps = hps
 
-        self.ctx = (
-            autocast(
-                enabled=self.hps.cuda,
-                dtype=torch.float16 if self.hps.fp16 else torch.float32,
-            )
-        )
         self.timesteps_so_far = 0
         self.actr_updates_so_far = 0
         self.crit_updates_so_far = 0
@@ -113,13 +106,6 @@ class Agent(object):
         self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actr_lr)
         self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.crit_lr)
         self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.crit_lr)
-
-        # set up the gradient scalers
-        self.actr_sclr = GradScaler(enabled=self.hps.fp16)
-        self.crit_sclr = GradScaler(enabled=self.hps.fp16)
-        self.twin_sclr = GradScaler(enabled=self.hps.fp16)
-        if not self.hps.prefer_td3_over_sac:
-            self.loga_sclr = GradScaler(enabled=self.hps.fp16)
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
@@ -295,39 +281,29 @@ class Agent(object):
 
         # update actor
         self.actr_opt.zero_grad()
-        actr_loss = self.actr_sclr.scale(actr_loss)
         actr_loss.backward()
         if self.hps.clip_norm > 0:
-            self.actr_sclr.unscale_(self.actr_opt)
             cg.clip_grad_norm_(self.actr.parameters(), self.hps.clip_norm)
-        self.actr_sclr.step(self.actr_opt)
-        self.actr_sclr.update()
+        self.actr_opt.step()
 
         if loga_loss is not None:
             # update log(alpha), and therefore alpha
             assert (not self.hps.prefer_td3_over_sac) and self.hps.autotune
             self.loga_opt.zero_grad()
-            loga_loss = self.loga_sclr.scale(loga_loss)
-            assert loga_loss is not None
             loga_loss.backward()
-            self.loga_sclr.step(self.loga_opt)
-            self.loga_sclr.update()
+            self.loga_opt.step()
 
     @beartype
     def update_crit(self, crit_loss: torch.Tensor, twin_loss: torch.Tensor):
 
         # update critic
         self.crit_opt.zero_grad()
-        crit_loss = self.crit_sclr.scale(crit_loss)
         crit_loss.backward()
-        self.crit_sclr.step(self.crit_opt)
-        self.crit_sclr.update()
+        self.crit_opt.step()
         # update twin
         self.twin_opt.zero_grad()
-        twin_loss = self.twin_sclr.scale(twin_loss)
         twin_loss.backward()
-        self.twin_sclr.step(self.twin_opt)
-        self.twin_sclr.update()
+        self.twin_opt.step()
 
     @beartype
     def update_targ_nets(self):

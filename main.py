@@ -111,7 +111,6 @@ class MagicRunner(object):
 
     @beartype
     def setup_device(self) -> torch.device:
-        assert not self._cfg.fp16 or self._cfg.cuda, "fp16 => cuda"
         if self._cfg.cuda:
             # use cuda
             assert torch.cuda.is_available()

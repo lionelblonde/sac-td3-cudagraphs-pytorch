@@ -1,6 +1,5 @@
 # resources
 cuda: true
-fp16: false
 
 # env
 vectorized: true
