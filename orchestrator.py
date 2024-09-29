@@ -366,6 +366,8 @@ def train(cfg: DictConfig,
     pbar = tqdm.tqdm(range(cfg.num_timesteps))
     time_spent_eval = 0
 
+    tlog = {}
+    elog = {}
     maxlen = 20 * cfg.eval_steps
     len_buff = deque(maxlen=maxlen)
     ret_buff = deque(maxlen=maxlen)
@@ -396,20 +398,19 @@ def train(cfg: DictConfig,
             # assemble the loss operands
             operands = agent.build_loss_operands(trns_batch)
             # compute the losses
-            log = {}
             with agent.ctx:
                 actr_loss, crit_loss, twin_loss, loga_loss = agent.compute_losses(*operands)
             # update the online networks
             if not cfg.actr_update_delay or bool(agent.crit_updates_so_far % 2):
                 agent.update_actr(actr_loss, loga_loss)
                 agent.actr_updates_so_far += 1
-                log.update(
+                tlog.update(
                     {
                         "loss/actr": actr_loss,
                     },
                 )
                 if loga_loss is not None:
-                    log.update(
+                    tlog.update(
                         {
                             "loss/loga": loga_loss,
                             "vitals/alpha": agent.alpha,
@@ -417,7 +418,7 @@ def train(cfg: DictConfig,
                     )
             agent.update_crit(crit_loss, twin_loss)
             agent.crit_updates_so_far += 1
-            log.update(
+            tlog.update(
                 {
                     "loss/crit": crit_loss,
                     "loss/twin": twin_loss,
@@ -425,15 +426,6 @@ def train(cfg: DictConfig,
             )
             # update the target networks
             agent.update_targ_nets()
-
-            if agent.crit_updates_so_far % (100 * cfg.training_steps_per_iter) == 0:
-                # log
-                wandb.log(
-                    {
-                       **log,
-                    },
-                    step=agent.timesteps_so_far,
-                )
 
         if (agent.timesteps_so_far % cfg.eval_every == 0):
             logger.info(("eval").upper())
@@ -464,12 +456,13 @@ def train(cfg: DictConfig,
 
             # log with wandb
             assert agent.replay_buffers is not None
-            log = {
+            elog = {
                 **{f"eval/{k}": v for k, v in eval_metrics.items()},
             }
             wandb.log(
                 {
-                    **log,
+                    **tlog,
+                    **elog,
                 },
                 step=agent.timesteps_so_far,
             )
@@ -493,6 +486,8 @@ def train(cfg: DictConfig,
                 )
 
         i += 1
+        tlog = {}
+        elog = {}
 
     # save once we are done
     agent.save(ckpt_dir, sfx="done")
