@@ -194,7 +194,8 @@ class Agent(object):
             if self.hps.prefer_td3_over_sac:
                 # using TD3
                 next_state_log_pi = None
-                pi_next_target = self.pi(self.actor_target, batch["next_observations"])  # target actor
+                pi_next_target = self.pi(
+                    self.actor_target, batch["next_observations"])  # target actor
                 # why use `pi`: we only have a handle on the target actor parameters
                 if self.hps.targ_actor_smoothing:
                     n_ = batch["actions"].clone().detach().normal_(0., self.hps.td3_std)
@@ -204,7 +205,8 @@ class Agent(object):
                     next_action = pi_next_target
             else:
                 # using SAC
-                next_action, next_state_log_pi, _ = self.actor.get_action(batch["next_observations"])
+                next_action, next_state_log_pi, _ = self.actor.get_action(
+                    batch["next_observations"])
 
             qf_next_target = torch.vmap(self.batched_qf, (0, None, None))(
                 self.qnet_target, batch["next_observations"], next_action,
