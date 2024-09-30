@@ -303,6 +303,8 @@ def train(cfg: DictConfig,
             i += 1
             continue
 
+        eval_this_iter = agent.timesteps_so_far % cfg.eval_every == 0
+
         logger.info(("train").upper())
         for _ in range(cfg.training_steps_per_iter):
             # sample a batch of transitions
@@ -314,7 +316,7 @@ def train(cfg: DictConfig,
             # update the online networks
             if not cfg.actor_update_delay or not bool(agent.qnet_updates_so_far % 2):
                 tc_update_actor(actor_loss)
-                if (agent.timesteps_so_far % cfg.eval_every == 0):
+                if eval_this_iter:
                     tlog.update(
                         {
                             "loss/actor": actor_loss,
@@ -323,7 +325,7 @@ def train(cfg: DictConfig,
                 agent.actor_updates_so_far += 1
                 if loga_loss is not None:
                     agent.update_alpha(loga_loss)
-                    if (agent.timesteps_so_far % cfg.eval_every == 0):
+                    if eval_this_iter:
                         tlog.update(
                             {
                                 "loss/loga": loga_loss,
@@ -332,7 +334,7 @@ def train(cfg: DictConfig,
                         )
             tc_update_qnets(qf_loss)
             agent.qnet_updates_so_far += 1
-            if (agent.timesteps_so_far % cfg.eval_every == 0):
+            if eval_this_iter:
                 tlog.update(
                     {
                         "loss/q": qf_loss,
@@ -341,7 +343,7 @@ def train(cfg: DictConfig,
             # update the target networks
             agent.update_targ_nets()
 
-        if (agent.timesteps_so_far % cfg.eval_every == 0):
+        if eval_this_iter:
             logger.info(("eval").upper())
             eval_start = time.time()
 
