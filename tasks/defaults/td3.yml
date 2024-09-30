@@ -18,7 +18,7 @@ num_timesteps: 10000000
 learning_starts: 25000
 training_steps_per_iter: 1
 eval_steps: 10
-eval_every: 2000
+eval_every: 10000
 
 # evaluation mode
 num_episodes: 10
