@@ -25,7 +25,7 @@ num_episodes: 10
 gather_trajectories: false
 
 # model
-batch_norm: true
+batch_norm: false
 layer_norm: false
 
 # optimization
