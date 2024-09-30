@@ -150,12 +150,14 @@ class MagicRunner(object):
         env, net_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.seed,
+            normalize_observations=self._cfg.normalize_observations,
             sync_vec_env=self._cfg.sync_vec_env,
             num_env=self._cfg.num_env,
         )
         eval_env, _, _, _ = make_env(
             self._cfg.env_id,
             self._cfg.seed,
+            normalize_observations=self._cfg.normalize_observations,
             sync_vec_env=True,
             num_env=1,
             video_path=video_path,
@@ -217,6 +219,7 @@ class MagicRunner(object):
         env, net_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.seed,
+            normalize_observations=self.cfg.normalize_observations,
             sync_vec_env=True,
             num_env=1,
             video_path=video_path,

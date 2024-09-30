@@ -16,7 +16,6 @@ from tensordict.nn import TensorDictModule
 from torchrl.data import ReplayBuffer
 
 from helpers import logger
-from helpers.normalizer import RunningMoments
 from agents.nets import log_module_info, Actor, TanhGaussActor, Critic
 
 
@@ -54,19 +53,10 @@ class Agent(object):
         # replay buffer
         self.rb = rb
 
-        self.rms_obs = None
-        if self.hps.batch_norm:
-            # create observation normalizer that maintains running statistics
-            self.rms_obs = RunningMoments(shape=self.ob_shape, device=self.device)
-
         # create online and target nets
 
-        actor_net_args = [self.ob_shape,
-                          self.ac_shape,
-                          (256, 256),
-                          self.rms_obs,
-                          self.min_ac,
-                          self.max_ac]
+        actor_net_args = [
+            self.ob_shape, self.ac_shape, (256, 256), self.min_ac, self.max_ac]
         actor_net_kwargs = {"layer_norm": self.hps.layer_norm}
         if self.hps.prefer_td3_over_sac:
             actor_net_kwargs.update({"exploration_noise": self.hps.actor_noise_std})
@@ -114,10 +104,7 @@ class Agent(object):
             self.policy = torch.compile(self.policy, mode=None)
             self.policy_explore = torch.compile(self.policy_explore, mode=None)
 
-        qnet_net_args = [self.ob_shape,
-                         self.ac_shape,
-                         (256, 256),
-                         self.rms_obs]
+        qnet_net_args = [self.ob_shape, self.ac_shape, (256, 256)]
         qnet_net_kwargs = {"layer_norm": self.hps.layer_norm}
 
         self.qnet1 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
@@ -365,10 +352,6 @@ class Agent(object):
             "actor_optimizer": self.actor_optimizer.state_dict(),
             "q_optimizer": self.q_optimizer.state_dict(),
         }
-        if self.hps.batch_norm:
-            assert self.rms_obs is not None
-            checkpoint.update({
-                "rms_obs": self.rms_obs.state_dict()})
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
         logger.info(f"{sfx} model saved to disk")
@@ -384,9 +367,6 @@ class Agent(object):
         if "timesteps_so_far" in checkpoint:
             self.timesteps_so_far = checkpoint["timesteps_so_far"]
         # the "strict" argument of `load_state_dict` is True by default
-        if self.hps.batch_norm:
-            assert self.rms_obs is not None
-            self.rms_obs.load_state_dict(checkpoint["rms_obs"])
         self.actor.load_state_dict(checkpoint["actor"])
         self.qnet1.load_state_dict(checkpoint["qnet1"])
         self.qnet2.load_state_dict(checkpoint["qnet2"])

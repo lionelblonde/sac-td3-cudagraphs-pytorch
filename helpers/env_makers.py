@@ -11,6 +11,10 @@ from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from gymnasium.vector.sync_vector_env import SyncVectorEnv
 from gymnasium.vector.async_vector_env import AsyncVectorEnv
 from gymnasium.wrappers.record_video import RecordVideo
+from gymnasium.wrappers.normalize import NormalizeObservation
+from gymnasium.wrappers.transform_observation import TransformObservation
+from gymnasium.wrappers.flatten_observation import FlattenObservation
+from gymnasium.wrappers.clip_action import ClipAction
 
 
 # Farama Foundation Gymnasium MuJoCo
@@ -78,6 +82,7 @@ def get_benchmark(env_id: str):
 def make_env(env_id: str,
              seed: int,
              *,
+             normalize_observations: bool,
              sync_vec_env: bool,
              num_env: int,
              video_path: Optional[Path] = None,
@@ -87,11 +92,14 @@ def make_env(env_id: str,
           np.ndarray,
           np.ndarray]):
 
+    # to deal with dm_control's Dict observation space: env = gym.wrappers.FlattenObservation(env)
+
     bench = get_benchmark(env_id)
 
     if bench == "farama_mujoco":
         return make_farama_mujoco_env(env_id,
                                       seed,
+                                      normalize_observations=normalize_observations,
                                       sync_vec_env=sync_vec_env,
                                       num_env=num_env,
                                       video_path=video_path,
@@ -103,6 +111,7 @@ def make_env(env_id: str,
 def make_farama_mujoco_env(env_id: str,
                            seed: int,
                            *,
+                           normalize_observations: bool,
                            sync_vec_env: bool,
                            num_env: int,
                            video_path: Optional[Path] = None,
@@ -120,7 +129,12 @@ def make_farama_mujoco_env(env_id: str,
                 env = RecordVideo(env, str(video_path))
             else:
                 env = gym.make(env_id)
+            env = FlattenObservation(env)  # deal with dm_control's Dict observation space
             env = RecordEpisodeStatistics(env)
+            env = ClipAction(env)
+            if normalize_observations:
+                env = NormalizeObservation(env)
+                env = TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
             env.action_space.seed(seed)
             if horizon is not None:
                 env = TimeLimit(env, max_episode_steps=horizon)

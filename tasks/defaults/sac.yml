@@ -8,6 +8,7 @@ sync_vec_env: true
 num_env: 8
 action_repeat: 1
 capture_video: false
+normalize_observations: false
 
 # logging
 wandb_project: "calico"
@@ -24,7 +25,6 @@ num_episodes: 10
 gather_trajectories: false
 
 # model
-batch_norm: false
 layer_norm: false
 
 # optimization

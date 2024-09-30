@@ -87,10 +87,6 @@ def segment(env: Union[Env, VectorEnv],
         rewards = rearrange(rewards, "b -> b 1")
         terminations = rearrange(terminations, "b -> b 1")
 
-        if agent.rms_obs is not None:
-            # update the observation normalizer
-            agent.rms_obs.update(obs)
-
         td = TensorDict(
             {
                 "observations": obs,

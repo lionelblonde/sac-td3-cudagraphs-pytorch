@@ -8,10 +8,8 @@ from torch import nn
 from torch.distributions import Normal
 
 from helpers import logger
-from helpers.normalizer import RunningMoments
 
 
-STANDARDIZED_OB_CLAMPS = [-5., 5.]
 SAC_LOG_STD_BOUNDS = [-5., 2.]
 
 
@@ -58,14 +56,12 @@ class Critic(nn.Module):
                  ob_shape: tuple[int, ...],
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
-                 rms_obs: Optional[RunningMoments],
                  *,
                  layer_norm: bool,
                  device: Optional[Union[str, torch.device]] = None):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
-        self.rms_obs = rms_obs
         self.layer_norm = layer_norm
 
         # assemble the last layers and output heads
@@ -91,8 +87,6 @@ class Critic(nn.Module):
 
     @beartype
     def forward(self, ob: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
-        if self.rms_obs is not None:
-            ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x, _ = pack([ob, ac], "b *")
         x = self.fc_stack(x)
         return self.head(x)
@@ -105,7 +99,6 @@ class Actor(nn.Module):
                  ob_shape: tuple[int, ...],
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
-                 rms_obs: Optional[RunningMoments],
                  min_ac: torch.Tensor,
                  max_ac: torch.Tensor,
                  *,
@@ -115,7 +108,6 @@ class Actor(nn.Module):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
-        self.rms_obs = rms_obs
         self.layer_norm = layer_norm
 
         # assemble the last layers and output heads
@@ -150,8 +142,6 @@ class Actor(nn.Module):
 
     @beartype
     def forward(self, ob: torch.Tensor) -> torch.Tensor:
-        if self.rms_obs is not None:
-            ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)
         x = self.head(x)
         return torch.tanh(x) * self.action_scale + self.action_bias
@@ -169,7 +159,6 @@ class TanhGaussActor(nn.Module):
                  ob_shape: tuple[int, ...],
                  ac_shape: tuple[int, ...],
                  hid_dims: tuple[int, int],
-                 rms_obs: Optional[RunningMoments],
                  min_ac: torch.Tensor,
                  max_ac: torch.Tensor,
                  *,
@@ -179,7 +168,6 @@ class TanhGaussActor(nn.Module):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
-        self.rms_obs = rms_obs
         self.rng = generator
         self.layer_norm = layer_norm
 
@@ -220,8 +208,6 @@ class TanhGaussActor(nn.Module):
 
     @beartype
     def forward(self, ob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.rms_obs is not None:
-            ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)
         mean, log_std = self.head(x).chunk(2, dim=-1)
         log_std = self.bound_log_std(log_std)
