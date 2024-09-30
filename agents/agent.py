@@ -188,19 +188,8 @@ class Agent(object):
     def predict(self, state: torch.Tensor, *, explore: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
         action = self.policy_explore(state) if explore else self.policy(state)
-
-        # if self.hps.prefer_td3_over_sac:
-        #     # using TD3
-        #     action = self.actor(state) if explore else self.actor.explore(state)
-        #     action.clamp(self.min_ac, self.max_ac)
-        # else:
-        #     # using SAC
-        #     # _, _, action = self.actor.get_action(state) # Normal dist: mode=mean
-        #
-        #     action = self.policy(state) 
-        #
-        #     # ac = (self.actor.sample(ob) if explore else self.actor.mode(ob))
-
+        if self.hps.prefer_td3_over_sac:
+            action.clamp(self.min_ac, self.max_ac)
         return action.cpu().numpy()
 
     @beartype
@@ -233,9 +222,6 @@ class Agent(object):
                 next_action = pi_next_target
         else:
             # using SAC
-
-            # next_action = self.actor.sample(next_state, stop_grad=True)
-
             next_action, next_state_log_pi, _ = self.actor.get_action(next_state)
 
         return state, action, next_state, next_action, next_state_log_pi, reward, done, td_len
@@ -260,13 +246,7 @@ class Agent(object):
             action_from_actor = self.actor(state)
         else:
             # using SAC
-
-            # action_from_actor = self.actor.sample(state, stop_grad=False)
-            # log_prob = self.actor.logp(state, action_from_actor)
-
             action_from_actor, state_log_pi, _ = self.actor.get_action(state)
-
-
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -300,9 +280,6 @@ class Agent(object):
 
             if not self.hps.prefer_td3_over_sac:  # only for SAC
                 # add the causal entropy regularization term
-
-                # next_log_prob = self.actor.logp(next_state, next_action)
-
                 q_prime -= self.alpha.detach() * next_state_log_pi
 
             # assemble the Bellman target
