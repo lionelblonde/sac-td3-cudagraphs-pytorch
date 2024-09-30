@@ -16,7 +16,6 @@ measure_burnin: 3
 # training mode
 num_timesteps: 10000000
 learning_starts: 25000
-training_steps_per_iter: 1
 eval_steps: 10
 eval_every: 10000
 
@@ -41,7 +40,7 @@ rb_capacity: 1000000
 polyak: 0.005
 prefer_td3_over_sac: true
 bcq_style_targ_mix: true
-actor_update_delay: 1
+actor_update_delay: 2
 actor_noise_std: 0.1
 targ_actor_smoothing: true
 td3_std: 0.2

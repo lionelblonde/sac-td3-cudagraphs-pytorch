@@ -311,29 +311,28 @@ def train(cfg: DictConfig,
         eval_this_iter = agent.timesteps_so_far % cfg.eval_every == 0
 
         logger.info(("train").upper())
-        for _ in range(cfg.training_steps_per_iter):
 
-            # sample batch of transitions
-            batch = agent.rb.sample(cfg.batch_size)
+        # sample batch of transitions
+        batch = agent.rb.sample(cfg.batch_size)
 
-            # update qnets
-            if eval_this_iter:
-                tlog.update(tc_update_qnets(batch))
-            else:
-                tc_update_qnets(batch)
+        # update qnets
+        if eval_this_iter:
+            tlog.update(tc_update_qnets(batch))
+        else:
+            tc_update_qnets(batch)
 
-            if agent.qnet_updates_so_far % cfg.actor_update_delay == 0:
-                # compensate for delay: wait X rounds, do X updates
-                # N.B.: WARNING -- any value >1 makes cudagraph not learn (why!?)
-                for _ in range(cfg.actor_update_delay):
-                    # update actor (and alpha)
-                    if eval_this_iter:
-                        tlog.update(tc_update_actor(batch))
-                    else:
-                        tc_update_actor(batch)
+        # update actor (and alpha)
+        if i % cfg.actor_update_delay == 0:
+            # compensate for delay: wait X rounds, do X updates
+            # N.B.: WARNING -- any value >1 makes cudagraph not learn (why!?)
+            for _ in range(cfg.actor_update_delay):
+                if eval_this_iter:
+                    tlog.update(tc_update_actor(batch))
+                else:
+                    tc_update_actor(batch)
 
-            # update the target networks
-            agent.update_targ_nets()
+        # update the target networks
+        agent.update_targ_nets()
 
         if eval_this_iter:
             logger.info(("eval").upper())
