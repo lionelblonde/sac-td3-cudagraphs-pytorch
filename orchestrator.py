@@ -314,27 +314,30 @@ def train(cfg: DictConfig,
             # update the online networks
             if not cfg.actor_update_delay or not bool(agent.qnet_updates_so_far % 2):
                 tc_update_actor(actor_loss)
-                tlog.update(
-                    {
-                        "loss/actor": actor_loss,
-                    },
-                )
+                if (agent.timesteps_so_far % cfg.eval_every == 0):
+                    tlog.update(
+                        {
+                            "loss/actor": actor_loss,
+                        },
+                    )
                 agent.actor_updates_so_far += 1
                 if loga_loss is not None:
                     agent.update_alpha(loga_loss)
-                    tlog.update(
-                        {
-                            "loss/loga": loga_loss,
-                            "vitals/alpha": agent.alpha,
-                        },
-                    )
+                    if (agent.timesteps_so_far % cfg.eval_every == 0):
+                        tlog.update(
+                            {
+                                "loss/loga": loga_loss,
+                                "vitals/alpha": agent.alpha,
+                            },
+                        )
             tc_update_qnets(qf_loss)
             agent.qnet_updates_so_far += 1
-            tlog.update(
-                {
-                    "loss/q": qf_loss,
-                },
-            )
+            if (agent.timesteps_so_far % cfg.eval_every == 0):
+                tlog.update(
+                    {
+                        "loss/q": qf_loss,
+                    },
+                )
             # update the target networks
             agent.update_targ_nets()
 
