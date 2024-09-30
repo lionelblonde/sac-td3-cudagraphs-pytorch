@@ -18,6 +18,9 @@ from helpers.env_makers import make_env
 from agents.agent import Agent
 
 
+os.environ["TORCHDYNAMO_INLINE_INBUILT_NN_MODULES"] = "1"
+
+
 @beartype
 def make_uuid(num_syllables: int = 2, num_parts: int = 3) -> str:
     """Randomly create a semi-pronounceable uuid"""

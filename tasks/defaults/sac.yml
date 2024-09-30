@@ -1,7 +1,7 @@
 # resources
 cuda: true
-compile: true
-cudagraphs: false
+compile: false
+cudagraphs: true
 
 # env
 sync_vec_env: true
@@ -41,7 +41,7 @@ rb_capacity: 1000000
 polyak: 0.005
 prefer_td3_over_sac: false
 bcq_style_targ_mix: false
-actor_update_delay: true
+actor_update_delay: 1
 crit_targ_update_freq: 1
 alpha_init: 0.2
 autotune: true

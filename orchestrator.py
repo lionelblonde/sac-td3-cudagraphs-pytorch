@@ -15,7 +15,7 @@ from wandb.errors import CommError
 import numpy as np
 import torch
 from tensordict import TensorDict
-# from tensordict.nn import CudaGraphModule
+from tensordict.nn import CudaGraphModule
 
 from gymnasium.core import Env
 from gymnasium.vector.vector_env import VectorEnv
@@ -87,16 +87,22 @@ def segment(env: Union[Env, VectorEnv],
         rewards = rearrange(rewards, "b -> b 1")
         terminations = rearrange(terminations, "b -> b 1")
 
-        tr = {
-            "observations": obs,
-            "next_observations": real_next_obs,
-            "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
-            "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
-            "terminations": terminations,
-            "dones": terminations,
-        }
+        if agent.rms_obs is not None:
+            # update the observation normalizer
+            agent.rms_obs.update(obs)
 
-        td = TensorDict(tr, batch_size=obs.shape[0], device=device)
+        td = TensorDict(
+            {
+                "observations": obs,
+                "next_observations": real_next_obs,
+                "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+                "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+                "terminations": terminations,
+                "dones": terminations,
+            },
+            batch_size=obs.shape[0],
+            device=device,
+        )
 
         agent.rb.extend(td)
 
@@ -268,8 +274,7 @@ def train(cfg: DictConfig,
     pbar = tqdm.tqdm(range(cfg.num_timesteps))
     time_spent_eval = 0
 
-    tlog = {}
-    elog = {}
+    tlog = TensorDict({})
     maxlen = 20 * cfg.eval_steps
     len_buff = deque(maxlen=maxlen)
     ret_buff = deque(maxlen=maxlen)
@@ -280,9 +285,9 @@ def train(cfg: DictConfig,
     if cfg.compile:
         tc_update_actor = torch.compile(tc_update_actor, mode=mode)
         tc_update_qnets = torch.compile(tc_update_qnets, mode=mode)
-    # if cfg.cudagraphs:
-    #     tc_update_actor = CudaGraphModule(tc_update_actor, in_keys=[], out_keys=[])
-    #     tc_update_qnets = CudaGraphModule(tc_update_qnets, in_keys=[], out_keys=[])
+    if cfg.cudagraphs:
+        tc_update_actor = CudaGraphModule(tc_update_actor, in_keys=[], out_keys=[])
+        tc_update_qnets = CudaGraphModule(tc_update_qnets, in_keys=[], out_keys=[])
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
@@ -307,39 +312,25 @@ def train(cfg: DictConfig,
 
         logger.info(("train").upper())
         for _ in range(cfg.training_steps_per_iter):
-            # sample a batch of transitions
-            trns_batch = agent.sample_batch()
-            # assemble the loss operands
-            operands = agent.build_loss_operands(trns_batch)
-            # compute the losses
-            actor_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
-            # update the online networks
-            if not cfg.actor_update_delay or not bool(agent.qnet_updates_so_far % 2):
-                tc_update_actor(actor_loss)
-                if eval_this_iter:
-                    tlog.update(
-                        {
-                            "loss/actor": actor_loss,
-                        },
-                    )
-                agent.actor_updates_so_far += 1
-                if loga_loss is not None:
-                    agent.update_alpha(loga_loss)
-                    if eval_this_iter:
-                        tlog.update(
-                            {
-                                "loss/loga": loga_loss,
-                                "vitals/alpha": agent.alpha,
-                            },
-                        )
-            tc_update_qnets(qf_loss)
-            agent.qnet_updates_so_far += 1
+
+            # sample batch of transitions
+            batch = agent.rb.sample(cfg.batch_size)
+
+            # update qnets
             if eval_this_iter:
-                tlog.update(
-                    {
-                        "loss/q": qf_loss,
-                    },
-                )
+                tlog.update(tc_update_qnets(batch))
+            else:
+                tc_update_qnets(batch)
+
+            if agent.qnet_updates_so_far % cfg.actor_update_delay == 0:
+                # compensate for delay: wait X rounds, do X updates
+                for _ in range(cfg.actor_update_delay):
+                    # update actor (and alpha)
+                    if eval_this_iter:
+                        tlog.update(tc_update_actor(batch))
+                    else:
+                        tc_update_actor(batch)
+
             # update the target networks
             agent.update_targ_nets()
 
@@ -371,13 +362,10 @@ def train(cfg: DictConfig,
             logger.dump_tabular()
 
             # log with wandb
-            elog = {
-                **{f"eval/{k}": v for k, v in eval_metrics.items()},
-            }
             wandb.log(
                 {
-                    **tlog,
-                    **elog,
+                    **tlog.to_dict(),
+                    **{f"eval/{k}": v for k, v in eval_metrics.items()},
                 },
                 step=agent.timesteps_so_far,
             )
@@ -400,8 +388,7 @@ def train(cfg: DictConfig,
                 )
 
         i += 1
-        tlog = {}
-        elog = {}
+        tlog.clear()
 
     # save once we are done
     agent.save(ckpt_dir, sfx="done")

@@ -77,6 +77,7 @@ class Agent(object):
             *actor_net_args, **actor_net_kwargs, device=self.device)
         self.actor_params = TensorDict.from_module(self.actor, as_module=True)
         self.actor_target = self.actor_params.data.clone()
+
         # discard params of net
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
             *actor_net_args, **actor_net_kwargs, device="meta")
@@ -108,9 +109,10 @@ class Agent(object):
                 in_keys=["observation"],
                 out_keys=["action"],  # sample
             )
-        # if self.hps.compile:
-        #     self.policy = torch.compile(self.policy, mode=None)
-        #     self.policy_explore = torch.compile(self.policy_explore, mode=None)
+
+        if self.hps.compile:
+            self.policy = torch.compile(self.policy, mode=None)
+            self.policy_explore = torch.compile(self.policy_explore, mode=None)
 
         qnet_net_args = [self.ob_shape,
                          self.ac_shape,
@@ -122,6 +124,7 @@ class Agent(object):
         self.qnet2 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
         self.qnet_params = TensorDict.from_modules(self.qnet1, self.qnet2, as_module=True)
         self.qnet_target = self.qnet_params.data.clone()
+
         # discard params of net
         self.qnet = Critic(*qnet_net_args, **qnet_net_kwargs, device="meta")
         self.qnet_params.to_module(self.qnet)
@@ -131,11 +134,13 @@ class Agent(object):
         self.q_optimizer = Adam(
             self.qnet.parameters(),
             lr=self.hps.crit_lr,
-            capturable=self.hps.cudagraphs and not self.hps.compile)
+            capturable=self.hps.cudagraphs and not self.hps.compile,
+        )
         self.actor_optimizer = Adam(
             list(self.actor.parameters()),
             lr=self.hps.actor_lr,
-            capturable=self.hps.cudagraphs and not self.hps.compile)
+            capturable=self.hps.cudagraphs and not self.hps.compile,
+        )
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
@@ -146,7 +151,11 @@ class Agent(object):
                 # common trick: learn log(alpha) instead of alpha directly
                 self.log_alpha.requires_grad = True
                 self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
-                self.loga_opt = Adam([self.log_alpha], lr=self.hps.log_alpha_lr)
+                self.alpha_opt = Adam(
+                    [self.log_alpha],
+                    lr=self.hps.log_alpha_lr,
+                    capturable=self.hps.cudagraphs and not self.hps.compile,
+                )
 
         # log module architectures
         log_module_info(self.actor)
@@ -180,11 +189,6 @@ class Agent(object):
         return None
 
     @beartype
-    def sample_batch(self) -> TensorDict:
-        """Sample (a) batch(es) of transitions from the replay buffer(s)"""
-        return self.rb.sample(self.hps.batch_size)
-
-    @beartype
     def predict(self, state: torch.Tensor, *, explore: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
         action = self.policy_explore(state) if explore else self.policy(state)
@@ -193,60 +197,77 @@ class Agent(object):
         return action.cpu().numpy()
 
     @beartype
-    def build_loss_operands(self, batch: TensorDict):
+    def update_qnets(self, batch: TensorDict) -> TensorDict:
+
+        self.q_optimizer.zero_grad()
 
         with torch.no_grad():
-            # define inputs
-            state = batch["observations"]
-            next_state = batch["next_observations"]
-            action = batch["actions"]
-            reward = batch["rewards"]
-            done = batch["dones"].float()
-            td_len = torch.ones_like(done)
 
-            if self.hps.batch_norm:
-                # update the observation normalizer
-                self.rms_obs.update(state)
-
-        # compute target action
-        if self.hps.prefer_td3_over_sac:
-            # using TD3
-            next_state_log_pi = None
-            pi_next_target = self.pi(self.actor_target, next_state)  # target actor
-            # why use `pi`: we only have a handle on the target actor parameters
-            if self.hps.targ_actor_smoothing:
-                n_ = action.clone().detach().normal_(0., self.hps.td3_std)
-                n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
-                next_action = (pi_next_target + n_).clamp(self.min_ac, self.max_ac)
+            # compute target action
+            if self.hps.prefer_td3_over_sac:
+                # using TD3
+                next_state_log_pi = None
+                pi_next_target = self.pi(self.actor_target, batch["next_observations"])  # target actor
+                # why use `pi`: we only have a handle on the target actor parameters
+                if self.hps.targ_actor_smoothing:
+                    n_ = batch["actions"].clone().detach().normal_(0., self.hps.td3_std)
+                    n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
+                    next_action = (pi_next_target + n_).clamp(self.min_ac, self.max_ac)
+                else:
+                    next_action = pi_next_target
             else:
-                next_action = pi_next_target
-        else:
-            # using SAC
-            next_action, next_state_log_pi, _ = self.actor.get_action(next_state)
+                # using SAC
+                next_action, next_state_log_pi, _ = self.actor.get_action(batch["next_observations"])
 
-        return state, action, next_state, next_action, next_state_log_pi, reward, done, td_len
+            qf_next_target = torch.vmap(self.batched_qf, (0, None, None))(
+                self.qnet_target, batch["next_observations"], next_action,
+            )
+
+            qf_min = qf_next_target.min(0).values
+            if self.hps.bcq_style_targ_mix:
+                # use BCQ style of target mixing: soft minimum
+                qf_max = qf_next_target.max(0).values
+                q_prime = ((0.75 * qf_min) + (0.25 * qf_max))
+            else:
+                # use TD3 style of target mixing: hard minimum
+                q_prime = qf_min
+
+            if not self.hps.prefer_td3_over_sac:  # only for SAC
+                # add the causal entropy regularization term
+                q_prime -= self.alpha * next_state_log_pi
+
+            # assemble the Bellman target
+            targ_q = batch["rewards"].flatten() + (
+                ~batch["dones"].flatten()
+            ).float() * self.hps.gamma * q_prime.view(-1)
+
+        qf_a_values = torch.vmap(self.batched_qf, (0, None, None, None))(
+            self.qnet_params, batch["observations"], batch["actions"], targ_q,
+        )
+        qf_loss = qf_a_values.sum(0)
+
+        qf_loss.backward()
+        self.q_optimizer.step()
+
+        self.qnet_updates_so_far += 1
+
+        return TensorDict(
+            {
+                "loss/qf_loss": qf_loss.detach(),
+            },
+        )
 
     @beartype
-    def compute_losses(self,
-                       state: torch.Tensor,
-                       action: torch.Tensor,
-                       next_state: torch.Tensor,
-                       next_action: torch.Tensor,
-                       next_state_log_pi: Optional[torch.Tensor],
-                       reward: torch.Tensor,
-                       done: torch.Tensor,
-                       td_len: torch.Tensor,
-        ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-        """Compute the critic and actor losses"""
+    def update_actor(self, batch: TensorDict) -> TensorDict:
 
-        loga_loss = None  # not used if using TD3
+        self.actor_optimizer.zero_grad()
 
         if self.hps.prefer_td3_over_sac:
             # using TD3
-            action_from_actor = self.actor(state)
+            action_from_actor = self.actor(batch["observations"])
         else:
             # using SAC
-            action_from_actor, state_log_pi, _ = self.actor.get_action(state)
+            action_from_actor, state_log_pi, _ = self.actor.get_action(batch["observations"])
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -262,74 +283,55 @@ class Agent(object):
             # yields to poor results, showing how allowing for non-zero gradients for the mean
             # can have a destructive effect, and that is why SAC does not allow them to flow.
 
-        self.q_optimizer.zero_grad()
-
-        with torch.no_grad():
-            qf_next_target = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_target, next_state, next_action,
-            )
-
-            qf_min = qf_next_target.min(0).values
-            if self.hps.bcq_style_targ_mix:
-                # use BCQ style of target mixing: soft minimum
-                qf_max = qf_next_target.max(0).values
-                q_prime = ((0.75 * qf_min) + (0.25 * qf_max))
-            else:
-                # use TD3 style of target mixing: hard minimum
-                q_prime = qf_min
-
-            if not self.hps.prefer_td3_over_sac:  # only for SAC
-                # add the causal entropy regularization term
-                q_prime -= self.alpha.detach() * next_state_log_pi
-
-            # assemble the Bellman target
-            targ_q = (reward + (self.hps.gamma ** td_len) * (1. - done) * q_prime)
-            targ_q = targ_q.squeeze()
-
-        qf_a_values = torch.vmap(self.batched_qf, (0, None, None, None))(
-            self.qnet_params, state, action, targ_q,
-        )
-        qf_loss = qf_a_values.sum(0)
-
-        # actor loss
-        self.actor_optimizer.zero_grad()
-
         if self.hps.prefer_td3_over_sac:
             qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_params.data, state, action_from_actor)
+                self.qnet_params.data, batch["observations"], action_from_actor)
             min_qf_pi = qf_pi[0]
             actor_loss = -min_qf_pi
         else:
             qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_params.data, state, action_from_actor)
+                self.qnet_params.data, batch["observations"], action_from_actor)
             min_qf_pi = qf_pi.min(0).values
             actor_loss = (self.alpha.detach() * state_log_pi) - min_qf_pi
-            if not actor_loss.mean().isfinite():
-                raise ValueError("NaNs: numerically unstable arctanh func")
         actor_loss = actor_loss.mean()
 
-        if (not self.hps.prefer_td3_over_sac) and self.hps.autotune:
-            self.loga_opt.zero_grad()
-            loga_loss = (self.log_alpha * (-state_log_pi - self.targ_ent).detach()).mean()
-
-        return actor_loss, qf_loss, loga_loss
-
-    @beartype
-    def update_actor(self, actor_loss: torch.Tensor):
         actor_loss.backward()
         if self.hps.clip_norm > 0:
             cg.clip_grad_norm_(self.actor.parameters(), self.hps.clip_norm)
         self.actor_optimizer.step()
 
-    @beartype
-    def update_alpha(self, loga_loss: torch.Tensor):
-        loga_loss.backward()
-        self.loga_opt.step()
+        self.actor_updates_so_far += 1
 
-    @beartype
-    def update_qnets(self, qf_loss):
-        qf_loss.backward()
-        self.q_optimizer.step()
+        if self.hps.prefer_td3_over_sac:
+            return TensorDict(
+                {
+                    "loss/actor": actor_loss.detach(),
+                },
+            )
+
+        if self.hps.autotune:
+            self.alpha_opt.zero_grad()
+            with torch.no_grad():
+                _, state_log_pi, _ = self.actor.get_action(batch["observations"])
+            alpha_loss = (self.alpha * (-state_log_pi - self.targ_ent).detach()).mean()  # alpha
+
+            alpha_loss.backward()
+            self.alpha_opt.step()
+
+            return TensorDict(
+                {
+                    "loss/actor_loss": actor_loss.detach(),
+                    "loss/alpha_loss": alpha_loss.detach(),
+                    "vitals/alpha": self.alpha.detach(),
+                },
+            )
+
+        return TensorDict(
+            {
+                "loss/actor_loss": actor_loss.detach(),
+                "vitals/alpha": self.alpha.detach(),
+            },
+        )
 
     @beartype
     def update_targ_nets(self):
