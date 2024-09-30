@@ -12,6 +12,7 @@ from torch.optim.adam import Adam
 from torch.nn import functional as ff
 from torch.nn.utils import clip_grad as cg
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 from torchrl.data import ReplayBuffer
 
 from helpers import logger
@@ -80,6 +81,36 @@ class Agent(object):
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
             *actor_net_args, **actor_net_kwargs, device="meta")
         self.actor_params.to_module(self.actor)
+
+        self.actor_detach = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
+            *actor_net_args, **actor_net_kwargs, device=self.device)
+        # copy params to actor_detach without grad
+        TensorDict.from_module(self.actor).data.to_module(self.actor_detach)
+        if self.hps.prefer_td3_over_sac:
+            self.policy = TensorDictModule(
+                self.actor_detach,
+                in_keys=["observation"],
+                out_keys=["action"],
+            )
+            self.policy_explore = TensorDictModule(
+                self.actor_detach.explore,
+                in_keys=["observation"],
+                out_keys=["action"],
+            )
+        else:
+            self.policy = TensorDictModule(
+                self.actor_detach.get_action,
+                in_keys=["observation"],
+                out_keys=["mean"],  # mode
+            )
+            self.policy_explore = TensorDictModule(
+                self.actor_detach.get_action,
+                in_keys=["observation"],
+                out_keys=["action"],  # sample
+            )
+        # if self.hps.compile:
+        #     self.policy = torch.compile(self.policy, mode=None)
+        #     self.policy_explore = torch.compile(self.policy_explore, mode=None)
 
         qnet_net_args = [self.ob_shape,
                          self.ac_shape,
@@ -156,16 +187,19 @@ class Agent(object):
     @beartype
     def predict(self, state: torch.Tensor, *, explore: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
-        with torch.no_grad():
-            if self.hps.prefer_td3_over_sac:
-                # using TD3
-                action = self.actor(state) if explore else self.actor.explore(state)
-                action.clamp(self.min_ac, self.max_ac)
-            else:
-                # using SAC
-                _, _, action = self.actor.get_action(state) # Normal dist: mode=mean
+        action = self.policy_explore(state) if explore else self.policy(state)
 
-                # ac = (self.actor.sample(ob) if explore else self.actor.mode(ob))
+        # if self.hps.prefer_td3_over_sac:
+        #     # using TD3
+        #     action = self.actor(state) if explore else self.actor.explore(state)
+        #     action.clamp(self.min_ac, self.max_ac)
+        # else:
+        #     # using SAC
+        #     # _, _, action = self.actor.get_action(state) # Normal dist: mode=mean
+        #
+        #     action = self.policy(state) 
+        #
+        #     # ac = (self.actor.sample(ob) if explore else self.actor.mode(ob))
 
         return action.cpu().numpy()
 
@@ -188,6 +222,7 @@ class Agent(object):
         # compute target action
         if self.hps.prefer_td3_over_sac:
             # using TD3
+            next_state_log_pi = None
             pi_next_target = self.pi(self.actor_target, next_state)  # target actor
             # why use `pi`: we only have a handle on the target actor parameters
             if self.hps.targ_actor_smoothing:
@@ -211,7 +246,7 @@ class Agent(object):
                        action: torch.Tensor,
                        next_state: torch.Tensor,
                        next_action: torch.Tensor,
-                       next_state_log_pi: torch.Tensor,
+                       next_state_log_pi: Optional[torch.Tensor],
                        reward: torch.Tensor,
                        done: torch.Tensor,
                        td_len: torch.Tensor,
