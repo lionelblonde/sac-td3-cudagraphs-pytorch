@@ -324,6 +324,7 @@ def train(cfg: DictConfig,
 
             if agent.qnet_updates_so_far % cfg.actor_update_delay == 0:
                 # compensate for delay: wait X rounds, do X updates
+                # N.B.: WARNING -- any value >1 makes cudagraph not learn (why!?)
                 for _ in range(cfg.actor_update_delay):
                     # update actor (and alpha)
                     if eval_this_iter:
