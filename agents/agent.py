@@ -154,17 +154,20 @@ class Agent(object):
         return self.rb.sample(self.hps.batch_size)
 
     @beartype
-    def predict(self, ob: torch.Tensor, *, explore: bool) -> np.ndarray:
+    def predict(self, state: torch.Tensor, *, explore: bool) -> np.ndarray:
         """Predict an action, with or without perturbation"""
-        if self.hps.prefer_td3_over_sac:
-            with torch.no_grad():
+        with torch.no_grad():
+            if self.hps.prefer_td3_over_sac:
                 # using TD3
-                ac = self.actor(ob) if explore else self.actor.explore(ob)
-        else:
-            # using SAC
-            # actions from sample and mode are detached by default
-            ac = (self.actor.sample(ob) if explore else self.actor.mode(ob))
-        return ac.clamp(self.min_ac, self.max_ac).cpu().numpy()
+                action = self.actor(state) if explore else self.actor.explore(state)
+                action.clamp(self.min_ac, self.max_ac)
+            else:
+                # using SAC
+                _, _, action = self.actor.get_action(state) # Normal dist: mode=mean
+
+                # ac = (self.actor.sample(ob) if explore else self.actor.mode(ob))
+
+        return action.cpu().numpy()
 
     @beartype
     def build_loss_operands(self, batch: TensorDict):
@@ -195,9 +198,12 @@ class Agent(object):
                 next_action = pi_next_target
         else:
             # using SAC
-            next_action = self.actor.sample(next_state, stop_grad=True)
 
-        return state, action, next_state, next_action, reward, done, td_len
+            # next_action = self.actor.sample(next_state, stop_grad=True)
+
+            next_action, next_state_log_pi, _ = self.actor.get_action(next_state)
+
+        return state, action, next_state, next_action, next_state_log_pi, reward, done, td_len
 
     @beartype
     def compute_losses(self,
@@ -205,6 +211,7 @@ class Agent(object):
                        action: torch.Tensor,
                        next_state: torch.Tensor,
                        next_action: torch.Tensor,
+                       next_state_log_pi: torch.Tensor,
                        reward: torch.Tensor,
                        done: torch.Tensor,
                        td_len: torch.Tensor,
@@ -216,11 +223,15 @@ class Agent(object):
         if self.hps.prefer_td3_over_sac:
             # using TD3
             action_from_actor = self.actor(state)
-            log_prob = None  # quiets down the type checker
         else:
             # using SAC
-            action_from_actor = self.actor.sample(state, stop_grad=False)
-            log_prob = self.actor.logp(state, action_from_actor)
+
+            # action_from_actor = self.actor.sample(state, stop_grad=False)
+            # log_prob = self.actor.logp(state, action_from_actor)
+
+            action_from_actor, state_log_pi, _ = self.actor.get_action(state)
+
+
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -254,8 +265,10 @@ class Agent(object):
 
             if not self.hps.prefer_td3_over_sac:  # only for SAC
                 # add the causal entropy regularization term
-                next_log_prob = self.actor.logp(next_state, next_action)
-                q_prime -= self.alpha.detach() * next_log_prob
+
+                # next_log_prob = self.actor.logp(next_state, next_action)
+
+                q_prime -= self.alpha.detach() * next_state_log_pi
 
             # assemble the Bellman target
             targ_q = (reward + (self.hps.gamma ** td_len) * (1. - done) * q_prime)
@@ -278,14 +291,14 @@ class Agent(object):
             qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
                 self.qnet_params.data, state, action_from_actor)
             min_qf_pi = qf_pi.min(0).values
-            actor_loss = (self.alpha.detach() * log_prob) - min_qf_pi
+            actor_loss = (self.alpha.detach() * state_log_pi) - min_qf_pi
             if not actor_loss.mean().isfinite():
                 raise ValueError("NaNs: numerically unstable arctanh func")
         actor_loss = actor_loss.mean()
 
         if (not self.hps.prefer_td3_over_sac) and self.hps.autotune:
             self.loga_opt.zero_grad()
-            loga_loss = (self.log_alpha * (-log_prob - self.targ_ent).detach()).mean()
+            loga_loss = (self.log_alpha * (-state_log_pi - self.targ_ent).detach()).mean()
 
         return actor_loss, qf_loss, loga_loss
 

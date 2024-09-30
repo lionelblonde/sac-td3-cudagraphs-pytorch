@@ -15,7 +15,7 @@ from wandb.errors import CommError
 import numpy as np
 import torch
 from tensordict import TensorDict
-from tensordict.nn import CudaGraphModule
+# from tensordict.nn import CudaGraphModule
 
 from gymnasium.core import Env
 from gymnasium.vector.vector_env import VectorEnv
@@ -280,9 +280,9 @@ def train(cfg: DictConfig,
     if cfg.compile:
         tc_update_actor = torch.compile(tc_update_actor, mode=mode)
         tc_update_qnets = torch.compile(tc_update_qnets, mode=mode)
-    if cfg.cudagraphs:
-        tc_update_actor = CudaGraphModule(tc_update_actor, in_keys=[], out_keys=[])
-        tc_update_qnets = CudaGraphModule(tc_update_qnets, in_keys=[], out_keys=[])
+    # if cfg.cudagraphs:
+    #     tc_update_actor = CudaGraphModule(tc_update_actor, in_keys=[], out_keys=[])
+    #     tc_update_qnets = CudaGraphModule(tc_update_qnets, in_keys=[], out_keys=[])
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
@@ -312,7 +312,7 @@ def train(cfg: DictConfig,
             # compute the losses
             actor_loss, qf_loss, loga_loss = agent.compute_losses(*operands)
             # update the online networks
-            if not cfg.actor_update_delay or bool(agent.qnet_updates_so_far % 2):
+            if not cfg.actor_update_delay or not bool(agent.qnet_updates_so_far % 2):
                 tc_update_actor(actor_loss)
                 tlog.update(
                     {

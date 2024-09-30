@@ -8,13 +8,14 @@ from einops import pack
 import torch
 from torch import nn
 from torch.nn import functional as ff
+from torch.distributions import Normal
 
 from helpers import logger
 from helpers.normalizer import RunningMoments
 
 
 STANDARDIZED_OB_CLAMPS = [-5., 5.]
-ARCTANH_EPS = 1e-8
+# ARCTANH_EPS = 1e-8
 SAC_LOG_STD_BOUNDS = [-5., 2.]
 
 
@@ -54,91 +55,91 @@ def init(constant_bias: float = 0.) -> Callable[[nn.Module], None]:
     return _init
 
 
-@beartype
-def arctanh(x: torch.Tensor) -> torch.Tensor:
-    """Implementation of the arctanh function.
-    Can be very numerically unstable, hence the clamping.
-    """
-    out = torch.atanh(x)
-    if out.sum().isfinite():
-        # note: a sum() is often faster than a any() or all()
-        # there might be edge cases but at worst we use the clamped version and get notified
-        return out
-    logger.info("using a numerically stable (and clamped) arctanh")
-    one_plus_x = (1 + x).clamp(
-        min=ARCTANH_EPS)
-    one_minus_x = (1 - x).clamp(
-        min=ARCTANH_EPS)
-    return 0.5 * torch.log(one_plus_x / one_minus_x)
-    # equivalent to 0.5 * (x.log1p() - (-x).log1p()) but with NaN-proof clamping
-    # torch.atanh(x) is numerically unstable here
-    # note: with both of the methods above, we get NaN at the first iteration
-
-
-class NormalToolkit(object):
-    """Technically, multivariate normal with diagonal covariance"""
-
-    @staticmethod
-    @beartype
-    def logp(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
-        neglogp = (0.5 * ((x - mean) / std).pow(2).sum(dim=-1, keepdim=True) +
-                   0.5 * math.log(2 * math.pi) +
-                   std.log().sum(dim=-1, keepdim=True))
-        return -neglogp
-
-    @staticmethod
-    @beartype
-    def sample(mean: torch.Tensor, std: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
-        # re-parametrization trick
-        eps = torch.empty(mean.size(), device=mean.device).normal_(generator=generator)
-        eps.requires_grad = False
-        return mean + (std * eps)
-
-    @staticmethod
-    @beartype
-    def mode(mean: torch.Tensor) -> torch.Tensor:
-        return mean
-
-
-class TanhNormalToolkit(object):
-    """Technically, multivariate normal with diagonal covariance"""
-
-    @staticmethod
-    @beartype
-    def logp(x: torch.Tensor,
-             mean: torch.Tensor,
-             std: torch.Tensor,
-             *,
-             scale: torch.Tensor) -> torch.Tensor:
-        # we need to assemble the logp of a sample which comes from a Gaussian sample
-        # after being mapped through a tanh. This needs a change of variable.
-        # See appendix C of the SAC paper for an explanation of this change of variable.
-        x_ = arctanh(x / scale)
-        logp1 = NormalToolkit.logp(x_, mean, std)
-        logp2 = 2. * (math.log(2.) - x_ - ff.softplus(-2. * x_))
-        logp2 = logp2.sum(dim=-1, keepdim=True)
-        return logp1 - logp2
-
-    @staticmethod
-    @beartype
-    def sample(mean: torch.Tensor,
-               std: torch.Tensor,
-               *,
-               generator: torch.Generator,
-               scale: torch.Tensor,
-               bias: torch.Tensor) -> torch.Tensor:
-        sample = NormalToolkit.sample(mean, std, generator)
-        sample = torch.tanh(sample)
-        return sample * scale + bias
-
-    @staticmethod
-    @beartype
-    def mode(mean: torch.Tensor,
-             *,
-             scale: torch.Tensor,
-             bias: torch.Tensor,
-    ) -> torch.Tensor:
-        return torch.tanh(mean) * scale + bias
+# @beartype
+# def arctanh(x: torch.Tensor) -> torch.Tensor:
+#     """Implementation of the arctanh function.
+#     Can be very numerically unstable, hence the clamping.
+#     """
+#     out = torch.atanh(x)
+#     if out.sum().isfinite():
+#         # note: a sum() is often faster than a any() or all()
+#         # there might be edge cases but at worst we use the clamped version and get notified
+#         return out
+#     logger.info("using a numerically stable (and clamped) arctanh")
+#     one_plus_x = (1 + x).clamp(
+#         min=ARCTANH_EPS)
+#     one_minus_x = (1 - x).clamp(
+#         min=ARCTANH_EPS)
+#     return 0.5 * torch.log(one_plus_x / one_minus_x)
+#     # equivalent to 0.5 * (x.log1p() - (-x).log1p()) but with NaN-proof clamping
+#     # torch.atanh(x) is numerically unstable here
+#     # note: with both of the methods above, we get NaN at the first iteration
+#
+#
+# class NormalToolkit(object):
+#     """Technically, multivariate normal with diagonal covariance"""
+#
+#     @staticmethod
+#     @beartype
+#     def logp(x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+#         neglogp = (0.5 * ((x - mean) / std).pow(2).sum(dim=-1, keepdim=True) +
+#                    0.5 * math.log(2 * math.pi) +
+#                    std.log().sum(dim=-1, keepdim=True))
+#         return -neglogp
+#
+#     @staticmethod
+#     @beartype
+#     def sample(mean: torch.Tensor, std: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
+#         # re-parametrization trick
+#         eps = torch.empty(mean.size(), device=mean.device).normal_(generator=generator)
+#         eps.requires_grad = False
+#         return mean + (std * eps)
+#
+#     @staticmethod
+#     @beartype
+#     def mode(mean: torch.Tensor) -> torch.Tensor:
+#         return mean
+#
+#
+# class TanhNormalToolkit(object):
+#     """Technically, multivariate normal with diagonal covariance"""
+#
+#     @staticmethod
+#     @beartype
+#     def logp(x: torch.Tensor,
+#              mean: torch.Tensor,
+#              std: torch.Tensor,
+#              *,
+#              scale: torch.Tensor) -> torch.Tensor:
+#         # we need to assemble the logp of a sample which comes from a Gaussian sample
+#         # after being mapped through a tanh. This needs a change of variable.
+#         # See appendix C of the SAC paper for an explanation of this change of variable.
+#         x_ = arctanh(x / scale)
+#         logp1 = NormalToolkit.logp(x_, mean, std)
+#         logp2 = 2. * (math.log(2.) - x_ - ff.softplus(-2. * x_))
+#         logp2 = logp2.sum(dim=-1, keepdim=True)
+#         return logp1 - logp2
+#
+#     @staticmethod
+#     @beartype
+#     def sample(mean: torch.Tensor,
+#                std: torch.Tensor,
+#                *,
+#                generator: torch.Generator,
+#                scale: torch.Tensor,
+#                bias: torch.Tensor) -> torch.Tensor:
+#         sample = NormalToolkit.sample(mean, std, generator)
+#         sample = torch.tanh(sample)
+#         return sample * scale + bias
+#
+#     @staticmethod
+#     @beartype
+#     def mode(mean: torch.Tensor,
+#              *,
+#              scale: torch.Tensor,
+#              bias: torch.Tensor,
+#     ) -> torch.Tensor:
+#         return torch.tanh(mean) * scale + bias
 
 
 class Critic(nn.Module):
@@ -300,28 +301,6 @@ class TanhGaussActor(nn.Module):
         self.register_buffer("action_bias",
             (max_ac + min_ac) / 2.0)
 
-    @beartype
-    def logp(self, ob: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
-        out = self(ob)
-        return TanhNormalToolkit.logp(ac, *out, scale=self.action_scale)  # mean, std
-
-    @beartype
-    def sample(self, ob: torch.Tensor, *, stop_grad: bool = True) -> torch.Tensor:
-        with torch.no_grad() if stop_grad else nullcontext():
-            out = self(ob)
-            return TanhNormalToolkit.sample(*out,
-                                            generator=self.rng,
-                                            scale=self.action_scale,
-                                            bias=self.action_bias)
-
-    @beartype
-    def mode(self, ob: torch.Tensor, *, stop_grad: bool = True) -> torch.Tensor:
-        with torch.no_grad() if stop_grad else nullcontext():
-            mean, _ = self(ob)
-            return TanhNormalToolkit.mode(mean,
-                                          scale=self.action_scale,
-                                          bias=self.action_bias)
-
     @staticmethod
     @beartype
     def bound_log_std(log_std: torch.Tensor) -> torch.Tensor:
@@ -335,7 +314,43 @@ class TanhGaussActor(nn.Module):
         if self.rms_obs is not None:
             ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x = self.fc_stack(ob)
-        ac_mean, ac_log_std = self.head(x).chunk(2, dim=-1)
-        ac_log_std = self.bound_log_std(ac_log_std)
-        ac_std = ac_log_std.exp()
-        return ac_mean, ac_std
+        mean, log_std = self.head(x).chunk(2, dim=-1)
+        log_std = self.bound_log_std(log_std)
+        std = log_std.exp()
+        return mean, std
+
+    @beartype
+    def get_action(self, ob: torch.Tensor):
+        mean, std = self(ob)
+        normal = Normal(mean, std)
+        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        y_t = torch.tanh(x_t)
+        action = y_t * self.action_scale + self.action_bias
+        log_prob = normal.log_prob(x_t)
+        # Enforcing Action Bound
+        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        log_prob = log_prob.sum(1, keepdim=True)
+        mean = torch.tanh(mean) * self.action_scale + self.action_bias
+        return action, log_prob, mean
+
+    # @beartype
+    # def logp(self, ob: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
+    #     out = self(ob)
+    #     return TanhNormalToolkit.logp(ac, *out, scale=self.action_scale)  # mean, std
+    #
+    # @beartype
+    # def sample(self, ob: torch.Tensor, *, stop_grad: bool = True) -> torch.Tensor:
+    #     with torch.no_grad() if stop_grad else nullcontext():
+    #         out = self(ob)
+    #         return TanhNormalToolkit.sample(*out,
+    #                                         generator=self.rng,
+    #                                         scale=self.action_scale,
+    #                                         bias=self.action_bias)
+
+    # @beartype
+    # def mode(self, ob: torch.Tensor, *, stop_grad: bool = True) -> torch.Tensor:
+    #     with torch.no_grad() if stop_grad else nullcontext():
+    #         mean, _ = self(ob)
+    #         return TanhNormalToolkit.mode(mean,
+    #                                       scale=self.action_scale,
+    #                                       bias=self.action_bias)
