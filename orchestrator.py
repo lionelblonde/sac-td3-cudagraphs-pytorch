@@ -25,14 +25,6 @@ from agents.agent import Agent
 
 
 @beartype
-def prettify_numb(n: int) -> str:
-    """Display an integer number of millions, ks, etc."""
-    m, k = divmod(n, 1_000_000)
-    k, u = divmod(k, 1_000)
-    return colored(f"{m}M {k}K {u}U", "red", attrs=["reverse"])
-
-
-@beartype
 @contextmanager
 def timed(op: str, timer: Callable[[], float]):
     logger.info(colored(
@@ -296,7 +288,6 @@ def train(cfg: DictConfig,
         next(roll_gen)
         agent.timesteps_so_far += (increment := cfg.segment_len * cfg.num_env)
         pbar.update(increment)
-        logger.info(f"so far {prettify_numb(agent.timesteps_so_far)} steps made")
 
         if agent.timesteps_so_far <= cfg.learning_starts:
             # start training when enough data
