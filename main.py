@@ -166,7 +166,7 @@ class MagicRunner(object):
         # agent
         rb = TensorDictReplayBuffer(
             storage=LazyTensorStorage(
-                self._cfg.rb_capacity * self._cfg.num_env, device=device,
+                self._cfg.rb_capacity, device=device,
             ),
         )
 
