@@ -135,7 +135,6 @@ def make_farama_mujoco_env(env_id: str,
             if normalize_observations:
                 env = NormalizeObservation(env)
                 env = TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-            env.action_space.seed(seed)
             if horizon is not None:
                 env = TimeLimit(env, max_episode_steps=horizon)
             return env
@@ -147,6 +146,7 @@ def make_farama_mujoco_env(env_id: str,
             make_env() for _ in range(num_env)
         ],
     )
+    env.action_space.seed(seed)  # to be fully reproducible
 
     # due diligence checks
     ob_space = env.observation_space
