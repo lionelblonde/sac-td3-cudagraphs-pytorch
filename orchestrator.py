@@ -352,6 +352,7 @@ def train(cfg: DictConfig,
                 {
                     **tlog.to_dict(),
                     **{f"eval/{k}": v for k, v in eval_metrics.items()},
+                    "vitals/replay_buffer_numel": len(agent.rb),
                 },
                 step=agent.timesteps_so_far,
             )
