@@ -93,17 +93,18 @@ class Spawner(object):
         self.wandb_project = f"{self._cfg.wandb_project}-{self.deployment}"
         # define spawn type
         self.job_type = "sweep" if self.sweep else "fixed"
-        # define the needed memory in GB
-        self.memory = MEMORY
 
         if self.deployment == "slurm":
             # translate intuitive caliber into duration and cluster partition
             calibers = {
-                "short": "0-06:00:00",
-                "long": "0-12:00:00",
-                "verylong": "1-00:00:00",
-                "veryverylong": "2-00:00:00",
-                "veryveryverylong": "4-00:00:00",
+                "veryshort": "0-01:00:00",
+                "short": "0-02:00:00",
+                "ok": "0-04:00:00",
+                "long": "0-06:00:00",
+                "verylong": "0-12:00:00",
+                "veryverylong": "1-00:00:00",
+                "veryveryverylong": "2-00:00:00",
+                "veryveryveryverylong": "4-00:00:00",
             }
             self.duration = calibers[caliber]  # KeyError trigger if invalid caliber
 
@@ -206,7 +207,7 @@ class Spawner(object):
                                 f"#SBATCH --ntasks=1\n"
                                 f"#SBATCH --cpus-per-task={self._cfg.num_env}\n"
                                 f"#SBATCH --time={self.duration}\n"
-                                f"#SBATCH --mem={self.memory}000\n"
+                                f"#SBATCH --mem={MEMORY}000\n"
                                 "#SBATCH --output=./out/run_%j.out\n")
             if self.deployment == "slurm":
                 # Sometimes versions are needed (some clusters)
