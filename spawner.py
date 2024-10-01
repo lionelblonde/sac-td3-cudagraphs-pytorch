@@ -48,9 +48,7 @@ GPU_MEM_MAP: dict[str, int] = {
 assert set(ENV_BUNDLES.keys()) == set(GPU_MEM_MAP.keys())
 
 GPU_MEMORY = 20
-MEMORY = 32
-NUM_NODES = 1
-NUM_WORKERS = 4
+MEMORY = 16
 NUM_SWEEP_TRIALS = 10
 DEST_DIR_AUTOGEN_CFG = Path("tasks/autogen")
 
@@ -80,7 +78,7 @@ class Spawner(object):
         old_path_to_cfg = self.proj_root / Path(cfg)
         _cfg = OmegaConf.load(old_path_to_cfg)
         assert isinstance(_cfg, DictConfig)
-        self._cfg: DictConfig = _cfg  # for the type-checker
+        self._cfg = _cfg
 
         new_path_to_cfg_dir = self.proj_root / DEST_DIR_AUTOGEN_CFG / self.uuid
         new_path_to_cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -133,6 +131,8 @@ class Spawner(object):
         # also use the bundle name to determine the GPU memory to request
         self.gpu_memory = GPU_MEM_MAP[env_bundle]
 
+        self.num_env = self._cfg.num_env
+
     @staticmethod
     @beartype
     def copy_and_add_seed(hpmap: dict[str, Any], seed: int) -> dict[str, Any]:
@@ -162,9 +162,7 @@ class Spawner(object):
             # random search: replace some entries with random values
             rng = np.random.default_rng(seed=654321)
             hpmap.update({
-                "batch_size": int(rng.choice([64, 128, 256])),
-                "actor_lr": float(rng.choice([1e-4, 3e-4])),
-                "critic_lr": float(rng.choice([1e-4, 3e-4])),
+                "batch_size": int(rng.choice([128, 256, 512])),
             })
 
         # carry out various duplications
@@ -204,9 +202,9 @@ class Spawner(object):
             bash_script_str = ("#!/usr/bin/env bash\n\n")
             bash_script_str += (f"#SBATCH --job-name={name}\n"
                                 f"#SBATCH --partition={self.partition}\n"
-                                f"#SBATCH --nodes={NUM_NODES}\n"
+                                f"#SBATCH --nodes=1\n"
                                 f"#SBATCH --ntasks=1\n"
-                                "#SBATCH --cpus-per-task=4\n"
+                                f"#SBATCH --cpus-per-task={self._cfg.num_env}\n"
                                 f"#SBATCH --time={self.duration}\n"
                                 f"#SBATCH --mem={self.memory}000\n"
                                 "#SBATCH --output=./out/run_%j.out\n")
