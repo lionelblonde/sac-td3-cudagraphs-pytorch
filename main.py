@@ -152,14 +152,17 @@ class MagicRunner(object):
             self._cfg.seed,
             normalize_observations=self._cfg.normalize_observations,
             sync_vec_env=self._cfg.sync_vec_env,
-            num_env=self._cfg.num_env,
+            num_envs=self._cfg.num_envs,
+            use_envpool=self._cfg.use_envpool,
         )
         eval_env, _, _, _ = make_env(
             self._cfg.env_id,
             self._cfg.seed,
+            # self._cfg.seed + 1234,
             normalize_observations=self._cfg.normalize_observations,
             sync_vec_env=True,
-            num_env=1,
+            num_envs=1,
+            use_envpool=self._cfg.use_envpool,
             video_path=video_path,
         )
 
@@ -219,9 +222,10 @@ class MagicRunner(object):
         env, net_shapes, min_ac, max_ac = make_env(
             self._cfg.env_id,
             self._cfg.seed,
-            normalize_observations=self.cfg.normalize_observations,
+            normalize_observations=self._cfg.normalize_observations,
             sync_vec_env=True,
-            num_env=1,
+            num_envs=1,
+            use_envpool=False,
             video_path=video_path,
         )
         assert isinstance(env, Env), "no vecenv allowed here"

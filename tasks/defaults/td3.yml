@@ -5,7 +5,8 @@ cudagraphs: true
 
 # env
 sync_vec_env: true
-num_env: 8
+num_envs: 8
+use_envpool: true
 action_repeat: 1
 capture_video: false
 normalize_observations: false

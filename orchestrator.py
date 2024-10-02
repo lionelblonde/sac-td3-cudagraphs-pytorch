@@ -47,7 +47,10 @@ def segment(env: Union[Env, VectorEnv],
             learning_starts: int,
             action_repeat: int):
 
-    obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
+    # obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
+    obs, _ = env.reset()
+    print(type(obs))
+    print(obs)
     obs = torch.as_tensor(obs, device=device, dtype=torch.float)
     actions = None  # as long as r is init at 0: ac will be written over
 
@@ -59,7 +62,12 @@ def segment(env: Union[Env, VectorEnv],
         if r % action_repeat == 0:
             # predict action
             if agent.timesteps_so_far < learning_starts:
-                actions = env.action_space.sample()
+                # actions = env.action_space.sample()
+                actions = np.array(
+                    [
+                        env.single_action_space.sample() for _ in range(env.num_envs)
+                    ],
+                )
             else:
                 actions = agent.predict(obs, explore=True)
 
@@ -71,28 +79,68 @@ def segment(env: Union[Env, VectorEnv],
 
         next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
         real_next_obs = next_obs.clone()
+
+        # for idx, trunc in enumerate(truncations):
+        #     if trunc:
+        #         real_next_obs[idx] = torch.as_tensor(
+        #             # infos["final_observation"][idx], device=device, dtype=torch.float)
+        #             infos["terminal_observation"][idx], device=device, dtype=torch.float)
+        #
+        # rewards = rearrange(rewards, "b -> b 1")
+        # terminations = rearrange(terminations, "b -> b 1")
+        #
+        # td = TensorDict(
+        #     {
+        #         "observations": obs,
+        #         "next_observations": real_next_obs,
+        #         "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+        #         "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+        #         "terminations": terminations,
+        #         "dones": terminations,
+        #     },
+        #     batch_size=obs.shape[0],
+        #     device=device,
+        # )
+        #
+        # agent.rb.extend(td)
+
+
+
+
+
+
+        valid = True
         for idx, trunc in enumerate(truncations):
             if trunc:
-                real_next_obs[idx] = torch.as_tensor(
-                    infos["final_observation"][idx], device=device, dtype=torch.float)
+                valid = False
+                break
 
-        rewards = rearrange(rewards, "b -> b 1")
-        terminations = rearrange(terminations, "b -> b 1")
 
-        td = TensorDict(
-            {
-                "observations": obs,
-                "next_observations": real_next_obs,
-                "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
-                "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
-                "terminations": terminations,
-                "dones": terminations,
-            },
-            batch_size=obs.shape[0],
-            device=device,
-        )
+        if valid:
+            rewards = rearrange(rewards, "b -> b 1")
+            terminations = rearrange(terminations, "b -> b 1")
 
-        agent.rb.extend(td)
+            td = TensorDict(
+                {
+                    "observations": obs,
+                    "next_observations": real_next_obs,
+                    "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+                    "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+                    "terminations": terminations,
+                    "dones": terminations,
+                },
+                batch_size=obs.shape[0],
+                device=device,
+            )
+
+            agent.rb.extend(td)
+
+
+
+
+
+
+
 
         obs = next_obs
 
@@ -117,17 +165,17 @@ def episode(env: Env,
         return seed + rng.integers(2**32 - 1, size=1).item()
         # seeded Generator: deterministic -> reproducible
 
-    if need_lists:
-        obs_list = []
-        next_obs_list = []
-        actions_list = []
-        rewards_list = []
-        terminations_list = []
-        dones_list = []
+    obs_list = []
+    next_obs_list = []
+    actions_list = []
+    rewards_list = []
+    terminations_list = []
+    dones_list = []
     ep_len = 0
     ep_ret = 0
 
-    ob, _ = env.reset(seed=randomize_seed())
+    # ob, _ = env.reset(seed=randomize_seed())
+    ob, _ = env.reset()
     if need_lists:
         obs_list.append(ob)
     ob = torch.as_tensor(ob, device=device, dtype=torch.float)
@@ -142,6 +190,9 @@ def episode(env: Env,
 
         new_ob, reward, termination, truncation, infos = env.step(action)
 
+        ep_len += 1
+        ep_ret += reward
+
         done = termination or truncation
 
         if need_lists:
@@ -154,11 +205,13 @@ def episode(env: Env,
         new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
         ob = new_ob
 
-        if "final_info" in infos:
-            # we have len(infos["final_info"]) == 1
-            for info in infos["final_info"]:
-                ep_len = float(info["episode"]["l"].item())
-                ep_ret = float(info["episode"]["r"].item())
+        # if "final_info" in infos:
+        #     # we have len(infos["final_info"]) == 1
+        #     for info in infos["final_info"]:
+        #         ep_len = float(info["episode"]["l"].item())
+        #         ep_ret = float(info["episode"]["r"].item())
+
+        if done:
 
             if need_lists:
                 out = {
@@ -169,12 +222,14 @@ def episode(env: Env,
                     "terminations": np.array(terminations_list),
                     "dones": np.array(dones_list),
                     "length": ep_len,
-                    "return": ep_ret,
+                    # "return": ep_ret,
+                    "return": np.array(ep_ret),
                 }
             else:
                 out = {
                     "length": ep_len,
-                    "return": ep_ret,
+                    # "return": ep_ret,
+                    "return": np.array(ep_ret),
                 }
             yield out
 
@@ -185,8 +240,11 @@ def episode(env: Env,
                 rewards_list = []
                 terminations_list = []
                 dones_list = []
+            ep_len = 0
+            ep_ret = 0
 
-            ob, _ = env.reset(seed=randomize_seed())
+            # ob, _ = env.reset(seed=randomize_seed())
+            ob, _ = env.reset()
             if need_lists:
                 obs_list.append(ob)
             ob = torch.as_tensor(ob, device=device, dtype=torch.float)
@@ -248,12 +306,11 @@ def train(cfg: DictConfig,
         cfg.action_repeat,
     )
     # create episode generator for evaluating the agent
-    eval_seed = cfg.seed + 123456  # arbitrary choice
     ep_gen = episode(
         eval_env,
         agent,
         device,
-        eval_seed,
+        cfg.seed,
     )
 
     i = 0
@@ -286,7 +343,7 @@ def train(cfg: DictConfig,
 
         logger.info(("interact").upper())
         next(roll_gen)
-        agent.timesteps_so_far += (increment := cfg.segment_len * cfg.num_env)
+        agent.timesteps_so_far += (increment := cfg.segment_len * cfg.num_envs)
         pbar.update(increment)
 
         if agent.timesteps_so_far <= cfg.learning_starts:
@@ -295,32 +352,24 @@ def train(cfg: DictConfig,
             i += 1
             continue
 
-        eval_this_iter = agent.timesteps_so_far % cfg.eval_every == 0
-
         logger.info(("train").upper())
 
         # sample batch of transitions
         batch = agent.rb.sample(cfg.batch_size)
 
         # update qnets
-        if eval_this_iter:
-            tlog.update(tc_update_qnets(batch))
-        else:
-            tc_update_qnets(batch)
+        tlog.update(tc_update_qnets(batch))
 
         # update actor (and alpha)
-        if i % cfg.actor_update_delay == 0:
+        if i % (cfg.actor_update_delay + 1) == 0:  # eval freq even number
             # compensate for delay: wait X rounds, do X updates
             for _ in range(cfg.actor_update_delay):
-                if eval_this_iter:
-                    tlog.update(tc_update_actor(batch))
-                else:
-                    tc_update_actor(batch)
+                tlog.update(tc_update_actor(batch))
 
         # update the target networks
         agent.update_targ_nets()
 
-        if eval_this_iter:
+        if agent.timesteps_so_far % cfg.eval_every == 0:
             logger.info(("eval").upper())
             eval_start = time.time()
 
@@ -331,8 +380,8 @@ def train(cfg: DictConfig,
 
             with torch.no_grad():
                 eval_metrics = {
-                    "length": torch.tensor(list(len_buff), dtype=torch.float).mean(),
-                    "return": torch.tensor(list(ret_buff), dtype=torch.float).mean(),
+                    "length": torch.tensor(np.array(list(len_buff)), dtype=torch.float).mean(),
+                    "return": torch.tensor(np.array(list(ret_buff)), dtype=torch.float).mean(),
                 }
 
             if (new_best := eval_metrics["return"].item()) > agent.best_eval_ep_ret:

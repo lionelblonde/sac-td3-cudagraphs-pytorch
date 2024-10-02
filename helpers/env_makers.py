@@ -16,6 +16,8 @@ from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.clip_action import ClipAction
 
+import envpool
+
 
 # Farama Foundation Gymnasium MuJoCo
 FARAMA_MUJOCO_STEM = [
@@ -84,10 +86,11 @@ def make_env(env_id: str,
              *,
              normalize_observations: bool,
              sync_vec_env: bool,
-             num_env: int,
+             num_envs: int,
+             use_envpool: bool,
              video_path: Optional[Path] = None,
              horizon: Optional[int] = None,
-    ) -> (tuple[Union[SyncVectorEnv, AsyncVectorEnv],
+    ) -> (tuple[Union[Env, SyncVectorEnv, AsyncVectorEnv],
           dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
@@ -101,7 +104,8 @@ def make_env(env_id: str,
                                       seed,
                                       normalize_observations=normalize_observations,
                                       sync_vec_env=sync_vec_env,
-                                      num_env=num_env,
+                                      num_envs=num_envs,
+                                      use_envpool=use_envpool,
                                       video_path=video_path,
                                       horizon=horizon)
     raise ValueError(f"invalid benchmark: {bench}")
@@ -113,10 +117,11 @@ def make_farama_mujoco_env(env_id: str,
                            *,
                            normalize_observations: bool,
                            sync_vec_env: bool,
-                           num_env: int,
+                           num_envs: int,
+                           use_envpool: bool,
                            video_path: Optional[Path] = None,
                            horizon: Optional[int] = None,
-    ) -> (tuple[Union[SyncVectorEnv, AsyncVectorEnv],
+    ) -> (tuple[Union[Env, SyncVectorEnv, AsyncVectorEnv],
           dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
@@ -124,29 +129,43 @@ def make_farama_mujoco_env(env_id: str,
     def make_env() -> Callable[[], Env]:
         def thunk() -> Env:
             if video_path is not None:
-                assert sync_vec_env and (num_env == 1)
+                assert sync_vec_env and (num_envs == 1)
                 env = gym.make(env_id, render_mode="rgb_array")
                 env = RecordVideo(env, str(video_path))
+            elif use_envpool:
+                env = envpool.make(
+                    env_id,
+                    env_type="gymnasium",
+                    num_envs=num_envs,
+                    seed=seed,
+                    frame_skip=1,
+                )
+                env.num_envs = num_envs
+                env.single_action_space = env.action_space
+                env.single_observation_space = env.observation_space
             else:
                 env = gym.make(env_id)
-            env = FlattenObservation(env)  # deal with dm_control's Dict observation space
-            env = RecordEpisodeStatistics(env)
-            env = ClipAction(env)
-            if normalize_observations:
-                env = NormalizeObservation(env)
-                env = TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-            if horizon is not None:
-                env = TimeLimit(env, max_episode_steps=horizon)
+                env = FlattenObservation(env)  # deal with dm_control's Dict observation space
+                env = RecordEpisodeStatistics(env)
+                env = ClipAction(env)
+                if normalize_observations:
+                    env = NormalizeObservation(env)
+                    env = TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+                if horizon is not None:
+                    env = TimeLimit(env, max_episode_steps=horizon)
             return env
         return thunk
 
     # create env
-    env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
-        [
-            make_env() for _ in range(num_env)
-        ],
-    )
-    env.action_space.seed(seed)  # to be fully reproducible
+    if use_envpool:
+        env = make_env()()
+    else:
+        env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
+            [
+                make_env() for _ in range(num_envs)
+            ],
+        )
+        env.action_space.seed(seed)  # to be fully reproducible
 
     # due diligence checks
     ob_space = env.observation_space
