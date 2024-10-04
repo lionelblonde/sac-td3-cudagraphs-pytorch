@@ -192,7 +192,7 @@ def episode(env: Env,
         new_ob, reward, termination, truncation, infos = env.step(action)
 
         ep_len += 1
-        ep_ret += float(reward)
+        ep_ret += np.array(reward).item()
 
         done = termination or truncation
 
