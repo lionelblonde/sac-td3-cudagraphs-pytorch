@@ -110,10 +110,10 @@ def segment(env: Union[Env, VectorEnv],
 
 
         valid = True
-        for idx, trunc in enumerate(truncations):
-            if trunc:
-                valid = False
-                break
+        # for idx, trunc in enumerate(truncations):
+        #     if trunc:
+        #         valid = False
+        #         break
 
 
         if valid:
@@ -154,6 +154,7 @@ def episode(env: Env,
             device: torch.device,
             seed: int,
             *,
+            use_envpool: bool,
             need_lists: bool = False):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
@@ -191,7 +192,7 @@ def episode(env: Env,
         new_ob, reward, termination, truncation, infos = env.step(action)
 
         ep_len += 1
-        ep_ret += reward
+        ep_ret += float(reward)
 
         done = termination or truncation
 
@@ -306,12 +307,7 @@ def train(cfg: DictConfig,
         cfg.action_repeat,
     )
     # create episode generator for evaluating the agent
-    ep_gen = episode(
-        eval_env,
-        agent,
-        device,
-        cfg.seed,
-    )
+    ep_gen = episode(eval_env, agent, device, cfg.seed, use_envpool=cfg.use_envpool)
 
     i = 0
     start_time = None
@@ -453,7 +449,10 @@ def evaluate(cfg: DictConfig,
     agent.load(cfg.load_ckpt)
 
     # create episode generator
-    ep_gen = episode(env, agent, device, cfg.seed, need_lists=cfg.gather_trajectories)
+    ep_gen = episode(
+        env, agent, device, cfg.seed,
+        use_envpool=cfg.use_envpool,
+        need_lists=cfg.gather_trajectories)
 
     pbar = tqdm.tqdm(range(cfg.num_episodes))
     pbar.set_description("evaluating")
