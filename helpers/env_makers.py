@@ -19,67 +19,6 @@ from gymnasium.wrappers.clip_action import ClipAction
 import envpool
 
 
-# Farama Foundation Gymnasium MuJoCo
-FARAMA_MUJOCO_STEM = [
-    "Ant",
-    "HalfCheetah",
-    "Hopper",
-    "HumanoidStandup",
-    "Humanoid",
-    "InvertedDoublePendulum",
-    "InvertedPendulum",
-    "Pusher",
-    "Reacher",
-    "Swimmer",
-    "Walker2d",
-]
-FARAMA_MUJOCO = []
-FARAMA_MUJOCO.extend([f"{name}-v4"
-    for name in FARAMA_MUJOCO_STEM])
-
-# DeepMind Control Suite (DMC) MuJoCo
-DEEPMIND_MUJOCO_STEM = [
-    "Hopper-Hop",
-    "Cheetah-Run",
-    "Walker-Walk",
-    "Walker-Run",
-    "Stacker-Stack_2",
-    "Stacker-Stack_4",
-    "Humanoid-Walk",
-    "Humanoid-Run",
-    "Humanoid-Run_Pure_State",
-    "Humanoid_CMU-Stand",
-    "Humanoid_CMU-Run",
-    "Quadruped-Walk",
-    "Quadruped-Run",
-    "Quadruped-Escape",
-    "Quadruped-Fetch",
-    "Dog-Run",
-    "Dog-Fetch",
-]
-DEEPMIND_MUJOCO = []
-DEEPMIND_MUJOCO.extend([f"{name}-Feat-v0"
-    for name in DEEPMIND_MUJOCO_STEM])
-
-# Flag benchmarks that are not available yet
-BENCHMARKS = {"farama_mujoco": FARAMA_MUJOCO, "deepmind_mujoco": DEEPMIND_MUJOCO}
-AVAILABLE_FLAGS = dict.fromkeys(BENCHMARKS, True)
-AVAILABLE_FLAGS["deepmind_mujoco"] = False  # TODO(lionel): integrate with the DMC suite
-
-
-@beartype
-def get_benchmark(env_id: str):
-    # verify that the specified env is amongst the admissible ones
-    benchmark = None
-    for k, v in BENCHMARKS.items():
-        if env_id in v:
-            benchmark = k
-            continue
-    assert benchmark is not None, "unsupported environment"
-    assert AVAILABLE_FLAGS[benchmark], "unavailable benchmark"
-    return benchmark
-
-
 @beartype
 def make_env(env_id: str,
              seed: int,
@@ -90,37 +29,6 @@ def make_env(env_id: str,
              use_envpool: bool,
              video_path: Optional[Path] = None,
              horizon: Optional[int] = None,
-    ) -> (tuple[Union[Env, SyncVectorEnv, AsyncVectorEnv],
-          dict[str, tuple[int, ...]],
-          np.ndarray,
-          np.ndarray]):
-
-    # to deal with dm_control's Dict observation space: env = gym.wrappers.FlattenObservation(env)
-
-    bench = get_benchmark(env_id)
-
-    if bench == "farama_mujoco":
-        return make_farama_mujoco_env(env_id,
-                                      seed,
-                                      normalize_observations=normalize_observations,
-                                      sync_vec_env=sync_vec_env,
-                                      num_envs=num_envs,
-                                      use_envpool=use_envpool,
-                                      video_path=video_path,
-                                      horizon=horizon)
-    raise ValueError(f"invalid benchmark: {bench}")
-
-
-@beartype
-def make_farama_mujoco_env(env_id: str,
-                           seed: int,
-                           *,
-                           normalize_observations: bool,
-                           sync_vec_env: bool,
-                           num_envs: int,
-                           use_envpool: bool,
-                           video_path: Optional[Path] = None,
-                           horizon: Optional[int] = None,
     ) -> (tuple[Union[Env, SyncVectorEnv, AsyncVectorEnv],
           dict[str, tuple[int, ...]],
           np.ndarray,
@@ -138,7 +46,6 @@ def make_farama_mujoco_env(env_id: str,
                     env_type="gymnasium",
                     num_envs=num_envs,
                     seed=seed,
-                    frame_skip=1,
                 )
                 env.num_envs = num_envs
                 env.single_action_space = env.action_space
