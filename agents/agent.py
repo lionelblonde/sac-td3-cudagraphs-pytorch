@@ -181,7 +181,7 @@ class Agent(object):
         action = self.policy_explore(state) if explore else self.policy(state)
         if self.hps.prefer_td3_over_sac:
             action.clamp(self.min_ac, self.max_ac)
-        return action.cpu().numpy()
+        return action  # .cpu().numpy()
 
     @beartype
     def update_qnets(self, batch: TensorDict) -> TensorDict:

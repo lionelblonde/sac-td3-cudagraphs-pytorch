@@ -3,6 +3,7 @@ from pathlib import Path
 
 from beartype import beartype
 import numpy as np
+import torch
 
 import gymnasium as gym
 from gymnasium.core import Env
@@ -16,6 +17,10 @@ from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.clip_action import ClipAction
 
 import envpool
+
+from brax import envs
+from brax.envs.wrappers import gym as gym_wrapper
+from brax.envs.wrappers import torch as torch_wrapper
 
 
 @beartype
@@ -46,10 +51,13 @@ def make_env(env_id: str,
              use_envpool: bool,
              video_path: Optional[Path] = None,
              horizon: Optional[int] = None,
+             device: Optional[torch.device] = None,
     ) -> (tuple[Union[Env, SyncVectorEnv, AsyncVectorEnv],
           dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
+
+    assert not (use_brax and use_envpool)
 
     env_id = pick_env(env_id, use_brax=use_brax)
 
@@ -69,6 +77,18 @@ def make_env(env_id: str,
                 env.num_envs = num_envs
                 env.single_action_space = env.action_space
                 env.single_observation_space = env.observation_space
+            elif use_brax:
+                assert device is not None
+                env = envs.create(env_id,
+                                  batch_size=num_envs,
+                                  # episode_length=episode_length,
+                                  backend="spring")
+                env = gym_wrapper.VectorGymWrapper(env)
+                # automatically convert between jax ndarrays and torch tensors:
+                env = torch_wrapper.TorchWrapper(env, device=device)
+                env.num_envs = num_envs
+                env.single_action_space = env.action_space
+                env.single_observation_space = env.observation_space
             else:
                 env = gym.make(env_id)
                 env = RecordEpisodeStatistics(env)
@@ -82,7 +102,7 @@ def make_env(env_id: str,
         return thunk
 
     # create env
-    if use_envpool:
+    if use_envpool or use_brax:
         env = make_env()()
     else:
         env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
