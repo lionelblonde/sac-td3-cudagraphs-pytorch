@@ -13,10 +13,20 @@ from gymnasium.vector.async_vector_env import AsyncVectorEnv
 from gymnasium.wrappers.record_video import RecordVideo
 from gymnasium.wrappers.normalize import NormalizeObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
-from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.clip_action import ClipAction
 
 import envpool
+
+
+ENVS = [
+    # mujoco
+    "Hopper-v4",
+    "Pusher-v4",
+    "HalfCheetah-v4",
+    "Walker2d-v4",
+    "Ant-v4",
+    "Humanoid-v4", "HumanoidStandup-v4",
+]
 
 
 @beartype
@@ -33,6 +43,8 @@ def make_env(env_id: str,
           dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
+
+    assert env_id in ENVS
 
     def make_env() -> Callable[[], Env]:
         def thunk() -> Env:
@@ -52,7 +64,6 @@ def make_env(env_id: str,
                 env.single_observation_space = env.observation_space
             else:
                 env = gym.make(env_id)
-                env = FlattenObservation(env)  # deal with dm_control's Dict observation space
                 env = RecordEpisodeStatistics(env)
                 env = ClipAction(env)
                 if normalize_observations:

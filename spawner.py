@@ -23,14 +23,12 @@ ENV_BUNDLES: dict[str, list[str]] = {
         "Hopper-v4",
     ],
     "low": [
-        "InvertedPendulum-v4"
-        "InvertedDoublePendulum-v4",
+        "Hopper-v4",
+        "Pusher-v4",
     ],
     "medium": [
-        "Hopper-v4",
         "HalfCheetah-v4",
         "Walker2d-v4",
-        "Pusher-v4",
         "Ant-v4",
     ],
     "high": [
