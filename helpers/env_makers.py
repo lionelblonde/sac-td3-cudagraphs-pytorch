@@ -18,33 +18,21 @@ from gymnasium.wrappers.clip_action import ClipAction
 import envpool
 
 
-ENVS = [
-    # OpenAI MuJoCo
-    "InvertedPendulum-v4",
-    "InvertedDoublePendulum-v4",
-    "Hopper-v4",
-    "Pusher-v4",
-    "HalfCheetah-v4",
-    "Walker2d-v4",
-    "Ant-v4",
-    "Humanoid-v4",
-    "HumanoidStandup-v4",
-    # "Reacher-v4",
-    # "Swimmer-v4",
-
-    # Google Brax
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "hopper",
-    "pusher",
-    "halfcheetah",
-    "walker2d",
-    "ant",
-    "humanoid",
-    "humanoidstandup",
-    # "reacher",
-    # "swimmer",
-]
+@beartype
+def pick_env(env_id: str, *, use_brax: bool) -> str:
+    return {
+        "ip": "inverted_pendulum" if use_brax else "InvertedPendulum-v4",
+        "idp": "inverted_double_pendulum" if use_brax else "InvertedDoublePendulum-v4",
+        "hopper": "hopper" if use_brax else "Hopper-v4",
+        "pusher": "pusher" if use_brax else "Pusher-v4",
+        "halfcheetah": "halfcheetah" if use_brax else "HalfCheetah-v4",
+        "walker2d": "walker2d" if use_brax else "Walker2d-v4",
+        "ant": "ant" if use_brax else "Ant-v4",
+        "humanoid": "humanoid" if use_brax else "Humanoid-v4",
+        "humanoidstandup": "humanoidstandup" if use_brax else "HumanoidStandup-v4",
+        "reacher": "reacher" if use_brax else "Reacher-v4",
+        "swimmer": "swimmer" if use_brax else "Swimmer-v4",
+    }[env_id]
 
 
 @beartype
@@ -54,6 +42,7 @@ def make_env(env_id: str,
              normalize_observations: bool,
              sync_vec_env: bool,
              num_envs: int,
+             use_brax: bool,
              use_envpool: bool,
              video_path: Optional[Path] = None,
              horizon: Optional[int] = None,
@@ -62,7 +51,7 @@ def make_env(env_id: str,
           np.ndarray,
           np.ndarray]):
 
-    assert env_id in ENVS
+    env_id = pick_env(env_id, use_brax=use_brax)
 
     def make_env() -> Callable[[], Env]:
         def thunk() -> Env:
