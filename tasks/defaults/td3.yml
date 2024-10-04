@@ -6,7 +6,6 @@ cudagraphs: true
 # env
 sync_vec_env: true
 num_envs: 8
-use_brax: true
 use_envpool: false
 action_repeat: 1
 capture_video: false

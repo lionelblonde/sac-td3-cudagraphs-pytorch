@@ -47,12 +47,9 @@ def segment(env: Union[Env, VectorEnv],
             learning_starts: int,
             action_repeat: int,
             *,
-            use_brax: bool,
             use_envpool: bool):
 
-    if use_brax:
-        obs = env.reset()
-    elif use_envpool:
+    if use_envpool:
         obs, _ = env.reset()
     else:
         obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
@@ -67,12 +64,11 @@ def segment(env: Union[Env, VectorEnv],
         if r % action_repeat == 0:
             # predict action
             if agent.timesteps_so_far < learning_starts:
-                actions = env.action_space.sample()
-                # actions = np.array(
-                #     [
-                #         env.single_action_space.sample() for _ in range(env.num_envs)
-                #     ],
-                # )
+                actions = np.array(
+                    [
+                        env.single_action_space.sample() for _ in range(env.num_envs)
+                    ],
+                )
             else:
                 actions = agent.predict(obs, explore=True)
 
@@ -80,15 +76,7 @@ def segment(env: Union[Env, VectorEnv],
             yield
 
         # interact with env
-        if use_brax:
-            if not isinstance(actions, torch.Tensor):
-                actions = torch.as_tensor(actions, device=device, dtype=torch.float32)
-            # print(actions.shape)
-            next_obs, rewards, dones, infos = env.step(actions)
-            # print(infos.keys())
-            truncations = infos["truncation"]
-            terminations = (dones * (1 - truncations)).bool()
-        elif use_envpool:
+        if use_envpool:
             next_obs, rewards, terminations, _, _ = env.step(actions)
         else:
             next_obs, rewards, terminations, truncations, infos = env.step(actions)
@@ -96,12 +84,7 @@ def segment(env: Union[Env, VectorEnv],
         next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
         real_next_obs = next_obs.clone()
 
-        if use_brax:
-            for idx, trunc in enumerate(truncations):
-                if trunc:
-                    real_next_obs[idx] = torch.as_tensor(
-                        infos["final_observation"][idx], device=device, dtype=torch.float)
-        elif use_envpool:
+        if use_envpool:
             pass
         else:
             for idx, trunc in enumerate(truncations):
@@ -160,9 +143,10 @@ def episode(env: Env,
     ep_len = 0
     ep_ret = 0
 
-    # ob, _ = env.reset(seed=randomize_seed())
-    # ob, _ = env.reset()
-    ob = env.reset()
+    if use_envpool:
+        ob, _ = env.reset()
+    else:
+        ob, _ = env.reset(seed=randomize_seed())
     if need_lists:
         obs_list.append(ob)
     ob = torch.as_tensor(ob, device=device, dtype=torch.float)
@@ -175,16 +159,10 @@ def episode(env: Env,
         if need_lists:
             actions_list.append(action)
 
-        # new_ob, reward, termination, truncation, infos = env.step(action)
-        if not isinstance(action, torch.Tensor):
-            action = torch.as_tensor(action, device=device, dtype=torch.float32)
-        new_ob, reward, dones, infos = env.step(action)
-        truncation = infos["truncation"]
-        termination = (dones * (1 - truncation)).bool()
+        new_ob, reward, termination, truncation, infos = env.step(action)
 
         ep_len += 1
-        # ep_ret += np.array(reward).item()
-        ep_ret += np.array(reward.cpu()).item()
+        ep_ret += np.array(reward).item()
 
         done = termination or truncation
 
@@ -198,11 +176,13 @@ def episode(env: Env,
         new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
         ob = new_ob
 
-        # if "final_info" in infos:
-        #     # we have len(infos["final_info"]) == 1
-        #     for info in infos["final_info"]:
-        #         ep_len = float(info["episode"]["l"].item())
-        #         ep_ret = float(info["episode"]["r"].item())
+        if "final_info" in infos:
+            # we have len(infos["final_info"]) == 1
+            for info in infos["final_info"]:
+                ep_len_ = float(info["episode"]["l"].item())
+                ep_ret_ = float(info["episode"]["r"].item())
+                assert ep_len_ == ep_len
+                assert ep_ret_ == ep_ret
 
         if done:
 
@@ -215,13 +195,11 @@ def episode(env: Env,
                     "terminations": np.array(terminations_list),
                     "dones": np.array(dones_list),
                     "length": ep_len,
-                    # "return": ep_ret,
                     "return": np.array(ep_ret),
                 }
             else:
                 out = {
                     "length": ep_len,
-                    # "return": ep_ret,
                     "return": np.array(ep_ret),
                 }
             yield out
@@ -236,9 +214,10 @@ def episode(env: Env,
             ep_len = 0
             ep_ret = 0
 
-            # ob, _ = env.reset(seed=randomize_seed())
-            # ob, _ = env.reset()
-            ob = env.reset()
+            if use_envpool:
+                ob, _ = env.reset()
+            else:
+                ob, _ = env.reset(seed=randomize_seed())
             if need_lists:
                 obs_list.append(ob)
             ob = torch.as_tensor(ob, device=device, dtype=torch.float)
@@ -298,7 +277,6 @@ def train(cfg: DictConfig,
         cfg.segment_len,
         cfg.learning_starts,
         cfg.action_repeat,
-        use_brax=cfg.use_brax,
         use_envpool=cfg.use_envpool,
     )
     # create episode generator for evaluating the agent

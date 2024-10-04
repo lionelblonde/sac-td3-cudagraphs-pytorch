@@ -15,29 +15,7 @@ from gymnasium.wrappers.record_video import RecordVideo
 from gymnasium.wrappers.normalize import NormalizeObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.clip_action import ClipAction
-
 import envpool
-
-from brax import envs
-from brax.envs.wrappers import gym as gym_wrapper
-from brax.envs.wrappers import torch as torch_wrapper
-
-
-@beartype
-def pick_env(env_id: str, *, use_brax: bool) -> str:
-    return {
-        "ip": "inverted_pendulum" if use_brax else "InvertedPendulum-v4",
-        "idp": "inverted_double_pendulum" if use_brax else "InvertedDoublePendulum-v4",
-        "hopper": "hopper" if use_brax else "Hopper-v4",
-        "pusher": "pusher" if use_brax else "Pusher-v4",
-        "halfcheetah": "halfcheetah" if use_brax else "HalfCheetah-v4",
-        "walker2d": "walker2d" if use_brax else "Walker2d-v4",
-        "ant": "ant" if use_brax else "Ant-v4",
-        "humanoid": "humanoid" if use_brax else "Humanoid-v4",
-        "humanoidstandup": "humanoidstandup" if use_brax else "HumanoidStandup-v4",
-        "reacher": "reacher" if use_brax else "Reacher-v4",
-        "swimmer": "swimmer" if use_brax else "Swimmer-v4",
-    }[env_id]
 
 
 @beartype
@@ -47,7 +25,6 @@ def make_env(env_id: str,
              normalize_observations: bool,
              sync_vec_env: bool,
              num_envs: int,
-             use_brax: bool,
              use_envpool: bool,
              video_path: Optional[Path] = None,
              horizon: Optional[int] = None,
@@ -56,10 +33,6 @@ def make_env(env_id: str,
           dict[str, tuple[int, ...]],
           np.ndarray,
           np.ndarray]):
-
-    assert not (use_brax and use_envpool)
-
-    env_id = pick_env(env_id, use_brax=use_brax)
 
     def make_env() -> Callable[[], Env]:
         def thunk() -> Env:
@@ -73,19 +46,8 @@ def make_env(env_id: str,
                     env_type="gymnasium",
                     num_envs=num_envs,
                     seed=seed,
+                    frame_skip=1,
                 )
-                env.num_envs = num_envs
-                env.single_action_space = env.action_space
-                env.single_observation_space = env.observation_space
-            elif use_brax:
-                assert device is not None
-                env = envs.create(env_id,
-                                  batch_size=num_envs,
-                                  # episode_length=episode_length,
-                                  backend="spring")
-                env = gym_wrapper.VectorGymWrapper(env)
-                # automatically convert between jax ndarrays and torch tensors:
-                env = torch_wrapper.TorchWrapper(env, device=device)
                 env.num_envs = num_envs
                 env.single_action_space = env.action_space
                 env.single_observation_space = env.observation_space
@@ -102,7 +64,7 @@ def make_env(env_id: str,
         return thunk
 
     # create env
-    if use_envpool or use_brax:
+    if use_envpool:
         env = make_env()()
     else:
         env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
