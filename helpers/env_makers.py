@@ -19,13 +19,31 @@ import envpool
 
 
 ENVS = [
-    # mujoco
+    # OpenAI MuJoCo
+    "InvertedPendulum-v4",
+    "InvertedDoublePendulum-v4",
     "Hopper-v4",
     "Pusher-v4",
     "HalfCheetah-v4",
     "Walker2d-v4",
     "Ant-v4",
-    "Humanoid-v4", "HumanoidStandup-v4",
+    "Humanoid-v4",
+    "HumanoidStandup-v4",
+    # "Reacher-v4",
+    # "Swimmer-v4",
+
+    # Google Brax
+    "inverted_pendulum",
+    "inverted_double_pendulum",
+    "hopper",
+    "pusher",
+    "halfcheetah",
+    "walker2d",
+    "ant",
+    "humanoid",
+    "humanoidstandup",
+    # "reacher",
+    # "swimmer",
 ]
 
 
