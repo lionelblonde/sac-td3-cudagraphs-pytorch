@@ -39,14 +39,6 @@ class Agent(object):
         assert isinstance(hps, DictConfig)
         self.hps = hps
 
-        self.ctx = (
-            torch.autocast(
-                "cuda",
-                enabled=self.hps.cuda,
-                dtype=torch.bfloat16 if self.hps.bfloat16 else torch.float32,
-            )
-        )
-
         self.timesteps_so_far = 0
         self.actor_updates_so_far = 0
         self.qnet_updates_so_far = 0
