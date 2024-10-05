@@ -190,7 +190,6 @@ class MagicRunner(object):
             eval_env=eval_env,
             agent_wrapper=agent_wrapper,
             name=self.name,
-            device=device,
         )
 
         # cleanup
@@ -245,7 +244,6 @@ class MagicRunner(object):
             env=env,
             agent_wrapper=agent_wrapper,
             name=self.name,
-            device=device,
         )
 
         # cleanup

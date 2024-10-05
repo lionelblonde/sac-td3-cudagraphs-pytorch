@@ -41,7 +41,6 @@ def timed(op: str, timer: Callable[[], float]):
 @beartype
 def segment(env: Union[Env, VectorEnv],
             agent: Agent,
-            device: torch.device,
             seed: int,
             segment_len: int,
             learning_starts: int,
@@ -50,7 +49,7 @@ def segment(env: Union[Env, VectorEnv],
     assert agent.rb is not None
 
     obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
-    obs = torch.as_tensor(obs, device=device, dtype=torch.float)
+    obs = torch.as_tensor(obs, device=agent.device, dtype=torch.float)
     actions = None  # as long as r is init at 0: ac will be written over
 
     t = 0
@@ -71,20 +70,20 @@ def segment(env: Union[Env, VectorEnv],
         # interact with env
         next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
-        next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
+        next_obs = torch.as_tensor(next_obs, device=agent.device, dtype=torch.float)
         real_next_obs = next_obs.clone()
 
         for idx, trunc in enumerate(np.array(truncations)):
             if trunc:
                 real_next_obs[idx] = torch.as_tensor(
-                    infos["final_observation"][idx], device=device, dtype=torch.float)
+                    infos["final_observation"][idx], device=agent.device, dtype=torch.float)
 
         rewards = rearrange(
-            torch.as_tensor(rewards, device=device, dtype=torch.float),
+            torch.as_tensor(rewards, device=agent.device, dtype=torch.float),
             "b -> b 1",
         )
         terminations = rearrange(
-            torch.as_tensor(terminations, device=device, dtype=torch.bool),
+            torch.as_tensor(terminations, device=agent.device, dtype=torch.bool),
             "b -> b 1",
         )
 
@@ -93,13 +92,13 @@ def segment(env: Union[Env, VectorEnv],
                 {
                     "observations": obs,
                     "next_observations": real_next_obs,
-                    "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
-                    "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+                    "actions": torch.as_tensor(actions, device=agent.device, dtype=torch.float),
+                    "rewards": torch.as_tensor(rewards, device=agent.device, dtype=torch.float),
                     "terminations": terminations,
                     "dones": terminations,
                 },
                 batch_size=obs.shape[0],
-                device=device,
+                device=agent.device,
             ),
         )
 
@@ -112,7 +111,6 @@ def segment(env: Union[Env, VectorEnv],
 @beartype
 def episode(env: Env,
             agent: Agent,
-            device: torch.device,
             seed: int,
             *,
             need_lists: bool = False):
@@ -138,7 +136,7 @@ def episode(env: Env,
     ob, _ = env.reset(seed=randomize_seed())
     if need_lists:
         obs_list.append(ob)
-    ob = torch.as_tensor(ob, device=device, dtype=torch.float)
+    ob = torch.as_tensor(ob, device=agent.device, dtype=torch.float)
 
     while True:
 
@@ -162,7 +160,7 @@ def episode(env: Env,
             if not done:
                 obs_list.append(new_ob)
 
-        new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
+        new_ob = torch.as_tensor(new_ob, device=agent.device, dtype=torch.float)
         ob = new_ob
 
         if "final_info" in infos:
@@ -206,7 +204,7 @@ def episode(env: Env,
             ob, _ = env.reset(seed=randomize_seed())
             if need_lists:
                 obs_list.append(ob)
-            ob = torch.as_tensor(ob, device=device, dtype=torch.float)
+            ob = torch.as_tensor(ob, device=agent.device, dtype=torch.float)
 
 
 @beartype
@@ -214,8 +212,7 @@ def train(cfg: DictConfig,
           env: Union[Env, VectorEnv],
           eval_env: Env,
           agent_wrapper: Callable[[], Agent],
-          name: str,
-          device: torch.device):
+          name: str):
 
     assert isinstance(cfg, DictConfig)
 
@@ -258,16 +255,9 @@ def train(cfg: DictConfig,
 
     # create segment generator for training the agent
     roll_gen = segment(
-        env,
-        agent,
-        device,
-        cfg.seed,
-        cfg.segment_len,
-        cfg.learning_starts,
-        cfg.action_repeat,
-    )
+        env, agent, cfg.seed, cfg.segment_len, cfg.learning_starts, cfg.action_repeat)
     # create episode generator for evaluating the agent
-    ep_gen = episode(eval_env, agent, device, cfg.seed)
+    ep_gen = episode(eval_env, agent, cfg.seed)
 
     i = 0
     start_time = None
@@ -394,8 +384,7 @@ def train(cfg: DictConfig,
 def evaluate(cfg: DictConfig,
              env: Env,
              agent_wrapper: Callable[[], Agent],
-             name: str,
-             device: torch.device):
+             name: str):
 
     assert isinstance(cfg, DictConfig)
 
@@ -410,7 +399,7 @@ def evaluate(cfg: DictConfig,
 
     # create episode generator
     ep_gen = episode(
-        env, agent, device, cfg.seed, need_lists=cfg.gather_trajectories)
+        env, agent, cfg.seed, need_lists=cfg.gather_trajectories)
 
     pbar = tqdm.tqdm(range(cfg.num_episodes))
     pbar.set_description("evaluating")
