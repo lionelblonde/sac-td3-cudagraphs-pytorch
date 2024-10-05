@@ -137,7 +137,7 @@ class Agent(object):
                 # common trick: learn log(alpha) instead of alpha directly
                 self.log_alpha.requires_grad = True
                 self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
-                self.alpha_opt = Adam(
+                self.alpha_optimizer = Adam(
                     [self.log_alpha],
                     lr=self.hps.log_alpha_lr,
                     capturable=self.hps.cudagraphs and not self.hps.compile,
@@ -298,13 +298,13 @@ class Agent(object):
             )
 
         if self.hps.autotune:
-            self.alpha_opt.zero_grad()
+            self.alpha_optimizer.zero_grad()
             with torch.no_grad():
                 _, state_log_pi, _ = self.actor.get_action(batch["observations"])
             alpha_loss = (self.alpha * (-state_log_pi - self.targ_ent).detach()).mean()  # alpha
 
             alpha_loss.backward()
-            self.alpha_opt.step()
+            self.alpha_optimizer.step()
 
             return TensorDict(
                 {
