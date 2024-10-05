@@ -1,5 +1,5 @@
 import os
-from typing import Union, Optional, Callable
+from typing import Union, Optional, Callable, Iterable, Any
 from pathlib import Path
 
 from beartype import beartype
@@ -41,7 +41,7 @@ BENCHMARKS = {
         ]
     ],
     "dmcs": [
-        f"{name}" for name in [
+        f"{name}" for name in [  # leave like this
             "walker-walk",
             "humanoid_CMU-walk",
             # "Hopper-Hop",
@@ -66,49 +66,20 @@ BENCHMARKS = {
 }
 
 
-def _spec_to_box(spec):
-
-    def extract_min_max(s):
-        assert s.dtype == np.float32
-        dim = int(np.prod(s.shape))
-        if type(s) == specs.Array:
-            bound = np.inf * np.ones(dim, dtype=np.float32)
-            return -bound, bound
-        if type(s) == specs.BoundedArray:
-            zeros = np.zeros(dim, dtype=np.float32)
-            return s.minimum + zeros, s.maximum + zeros
-        raise TypeError("unrecognized type")
-
-    mins, maxs = [], []
-    for s in spec:
-        mn, mx = extract_min_max(s)
-        mins.append(mn)
-        maxs.append(mx)
-    low = np.concatenate(mins, axis=0).astype(np.float32)
-    high = np.concatenate(maxs, axis=0).astype(np.float32)
-    assert low.shape == high.shape
-    return Box(low, high, dtype=np.float32)
-
-
-@beartype
-def _flatten_obs(obs: dict[str, np.ndarray]) -> np.ndarray:
-    obs_pieces = []
-    for v in obs.values():
-        flat = np.array([v]) if np.isscalar(v) else v.ravel()
-        obs_pieces.append(flat)
-    return np.concatenate(obs_pieces, axis=0).astype(np.float32)
-
-
 class DeepMindControlSuite(Env):
+    """credit: https://github.com/imgeorgiev/dmc2gymnasium
+    Not exact replica, but a subset of the above + type hints
+    """
 
+    @beartype
     def __init__(self,
-                 domain_name,
-                 task_name,
+                 domain_name: str,
+                 task_name: str,
                  /,
-                 rendering="egl",
-                 render_height=64,
-                 render_width=64,
-                 render_camera_id=0):
+                 rendering: str = "egl",
+                 render_height: int = 64,
+                 render_width: int = 64,
+                 render_camera_id: int = 0):
 
         # for details see https://github.com/deepmind/dm_control
         assert rendering in {"glfw", "egl", "osmesa"}
@@ -122,33 +93,83 @@ class DeepMindControlSuite(Env):
         self.render_width = render_width
         self.render_camera_id = render_camera_id
 
-        self._observation_space = _spec_to_box(self._env.observation_spec().values())
-        self._action_space = _spec_to_box([self._env.action_spec()])
+        self._observation_space = self.spec_to_box(self._env.observation_spec().values())
+        self._action_space = self.spec_to_box([self._env.action_spec()])
 
-    def step(self, action):
+    @staticmethod
+    @beartype
+    def spec_to_box(spec: Iterable) -> Box:
+
+        @beartype
+        def extract_min_max(s: Union[specs.Array, specs.BoundedArray],
+        ) -> tuple[np.ndarray, np.ndarray]:
+            assert s.dtype == np.float32
+            dim = int(np.prod(s.shape))
+            if type(s) == specs.Array:
+                bound = np.inf * np.ones(dim, dtype=np.float32)
+                return -bound, bound
+            if type(s) == specs.BoundedArray:
+                zeros = np.zeros(dim, dtype=np.float32)
+                return s.minimum + zeros, s.maximum + zeros
+            raise TypeError("unrecognized type")
+
+        mins, maxs = [], []
+        for s in spec:
+            mn, mx = extract_min_max(s)
+            mins.append(mn)
+            maxs.append(mx)
+        low = np.concatenate(mins, axis=0).astype(np.float32)
+        high = np.concatenate(maxs, axis=0).astype(np.float32)
+        assert low.shape == high.shape
+        return Box(low, high, dtype=np.float32)
+
+    @staticmethod
+    @beartype
+    def flatten_obs(obs: dict[str, np.ndarray]) -> np.ndarray:
+        obs_pieces = []
+        for v in obs.values():
+            flat = np.array([v]) if np.isscalar(v) else v.ravel()
+            obs_pieces.append(flat)
+        return np.concatenate(obs_pieces, axis=0).astype(np.float32)
+
+    @beartype
+    def step(self,
+             action: np.ndarray,
+        ) -> tuple[np.ndarray, np.ndarray, bool, bool, dict[str, Any]]:
         if action.dtype.kind == "f":
             action = action.astype(np.float32)
         assert self._action_space.contains(action)
         timestep = self._env.step(action)
-        observation = _flatten_obs(timestep.observation)
+        observation = self.flatten_obs(timestep.observation)
         reward = timestep.reward
         termination = False  # we never reach a goal
         truncation = timestep.last()
         info = {"discount": timestep.discount}
         return observation, reward, termination, truncation, info
 
-    def reset(self, seed=None, options=None):
+    @beartype
+    def reset(self,
+              *,
+              seed: Optional[int] = None,
+              options: Optional[dict[str, Any]] = None,
+        ) -> tuple[np.ndarray, dict[str, Any]]:
+        assert options is None
         if seed is not None:
+            seed_ = None
             if not isinstance(seed, np.random.RandomState):
-                seed = np.random.RandomState(seed)
-            self._env.task._random = seed
+                seed_ = np.random.RandomState(seed)
+            self._env.task._random = seed_
 
         timestep = self._env.reset()
-        observation = _flatten_obs(timestep.observation)
+        observation = self.flatten_obs(timestep.observation)
         info = {}
         return observation, info
 
-    def render(self, height=None, width=None, camera_id=None):
+    @beartype
+    def render(self,
+               height: Optional[int] = None,
+               width: Optional[int] = None,
+               camera_id: Optional[int] = None) -> np.ndarray:
         height = height or self.render_height
         width = width or self.render_width
         camera_id = camera_id or self.render_camera_id
@@ -184,7 +205,9 @@ def make_env(env_id: str,
 
     bench = get_benchmark(env_id)
 
+    @beartype
     def make_env() -> Callable[[], Env]:
+        @beartype
         def thunk() -> Env:
             if video_path is not None:
                 assert sync_vec_env and (num_envs == 1)
