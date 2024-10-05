@@ -7,10 +7,9 @@ from omegaconf import OmegaConf, DictConfig
 import wandb
 import numpy as np
 import torch
-import torch.special
 from torch.optim.adam import Adam
 from torch.nn import functional as ff
-from torch.nn.utils import clip_grad as cg
+from torch.nn.utils import clip_grad
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.data import ReplayBuffer
@@ -39,6 +38,14 @@ class Agent(object):
 
         assert isinstance(hps, DictConfig)
         self.hps = hps
+
+        self.ctx = (
+            torch.autocast(
+                "cuda",
+                enabled=self.hps.cuda,
+                dtype=torch.bfloat16 if self.hps.bfloat16 else torch.float32,
+            )
+        )
 
         self.timesteps_so_far = 0
         self.actor_updates_so_far = 0
@@ -123,11 +130,13 @@ class Agent(object):
             lr=self.hps.crit_lr,
             capturable=self.hps.cudagraphs and not self.hps.compile,
         )
+        self.q_scaler = torch.GradScaler(enabled=self.hps.bfloat16)
         self.actor_optimizer = Adam(
             list(self.actor.parameters()),
             lr=self.hps.actor_lr,
             capturable=self.hps.cudagraphs and not self.hps.compile,
         )
+        self.actor_scaler = torch.GradScaler(enabled=self.hps.bfloat16)
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
@@ -138,11 +147,12 @@ class Agent(object):
                 # common trick: learn log(alpha) instead of alpha directly
                 self.log_alpha.requires_grad = True
                 self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
-                self.alpha_opt = Adam(
+                self.alpha_optimizer = Adam(
                     [self.log_alpha],
                     lr=self.hps.log_alpha_lr,
                     capturable=self.hps.cudagraphs and not self.hps.compile,
                 )
+                self.alpha_scaler = torch.GradScaler(enabled=self.hps.bfloat16)
 
         # log module architectures
         log_module_info(self.actor)
@@ -230,12 +240,16 @@ class Agent(object):
                 ~batch["dones"].flatten()
             ).float() * self.hps.gamma * q_prime.view(-1)
 
-        qf_a_values = torch.vmap(self.batched_qf, (0, None, None, None))(
-            self.qnet_params, batch["observations"], batch["actions"], targ_q,
-        )
-        qf_loss = qf_a_values.sum(0)
+        with self.ctx:
+            qf_a_values = torch.vmap(self.batched_qf, (0, None, None, None))(
+                self.qnet_params, batch["observations"], batch["actions"], targ_q,
+            )
+            qf_loss = qf_a_values.sum(0)
 
+        qf_loss = self.q_scaler.scale(qf_loss)
         qf_loss.backward()
+        self.q_scaler.step(self.q_optimizer)
+        self.q_scaler.update()
         self.q_optimizer.step()
 
         self.qnet_updates_so_far += 1
@@ -272,21 +286,26 @@ class Agent(object):
             # yields to poor results, showing how allowing for non-zero gradients for the mean
             # can have a destructive effect, and that is why SAC does not allow them to flow.
 
-        if self.hps.prefer_td3_over_sac:
-            qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_params.data, batch["observations"], action_from_actor)
-            min_qf_pi = qf_pi[0]
-            actor_loss = -min_qf_pi
-        else:
-            qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
-                self.qnet_params.data, batch["observations"], action_from_actor)
-            min_qf_pi = qf_pi.min(0).values
-            actor_loss = (self.alpha.detach() * state_log_pi) - min_qf_pi
-        actor_loss = actor_loss.mean()
+        with self.ctx:
+            if self.hps.prefer_td3_over_sac:
+                qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
+                    self.qnet_params.data, batch["observations"], action_from_actor)
+                min_qf_pi = qf_pi[0]
+                actor_loss = -min_qf_pi
+            else:
+                qf_pi = torch.vmap(self.batched_qf, (0, None, None))(
+                    self.qnet_params.data, batch["observations"], action_from_actor)
+                min_qf_pi = qf_pi.min(0).values
+                actor_loss = (self.alpha.detach() * state_log_pi) - min_qf_pi
+            actor_loss = actor_loss.mean()
 
+        actor_loss = self.actor_scaler.scale(actor_loss)
         actor_loss.backward()
         if self.hps.clip_norm > 0:
-            cg.clip_grad_norm_(self.actor.parameters(), self.hps.clip_norm)
+            self.actor_scaler.unscale_(self.actor_optimizer)
+            clip_grad.clip_grad_norm_(self.actor.parameters(), self.hps.clip_norm)
+        self.actor_scaler.step(self.actor_optimizer)
+        self.actor_scaler.update()
         self.actor_optimizer.step()
 
         self.actor_updates_so_far += 1
@@ -299,13 +318,17 @@ class Agent(object):
             )
 
         if self.hps.autotune:
-            self.alpha_opt.zero_grad()
+            self.alpha_optimizer.zero_grad()
             with torch.no_grad():
                 _, state_log_pi, _ = self.actor.get_action(batch["observations"])
-            alpha_loss = (self.alpha * (-state_log_pi - self.targ_ent).detach()).mean()  # alpha
+            with self.ctx:
+                alpha_loss = (self.alpha * (-state_log_pi - self.targ_ent).detach()).mean()
 
+            alpha_loss = self.alpha_scaler.scale(alpha_loss)
             alpha_loss.backward()
-            self.alpha_opt.step()
+            self.alpha_scaler.step(self.alpha_optimizer)
+            self.alpha_scaler.update()
+            self.alpha_optimizer.step()
 
             return TensorDict(
                 {

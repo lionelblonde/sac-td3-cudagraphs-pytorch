@@ -1,5 +1,6 @@
 # resources
 cuda: true
+bfloat16: true
 compile: false
 cudagraphs: true
 

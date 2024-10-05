@@ -89,20 +89,18 @@ def segment(env: Union[Env, VectorEnv],
         )
 
         agent.rb.extend(
-            [
-                TensorDict(
-                    {
-                        "observations": obs,
-                        "next_observations": real_next_obs,
-                        "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
-                        "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
-                        "terminations": terminations,
-                        "dones": terminations,
-                    },
-                    batch_size=obs.shape[0],
-                    device=device,
-                ),
-            ],
+            TensorDict(
+                {
+                    "observations": obs,
+                    "next_observations": real_next_obs,
+                    "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+                    "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+                    "terminations": terminations,
+                    "dones": terminations,
+                },
+                batch_size=obs.shape[0],
+                device=device,
+            ),
         )
 
         obs = next_obs
