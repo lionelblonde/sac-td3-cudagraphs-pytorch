@@ -13,7 +13,6 @@ from torch.nn.utils import clip_grad
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.data import ReplayBuffer
-import ml_dtypes
 
 from helpers import logger
 from agents.nets import log_module_info, Actor, TanhGaussActor, Critic
@@ -40,8 +39,6 @@ class Agent(object):
         assert isinstance(hps, DictConfig)
         self.hps = hps
 
-        self.fdtype = torch.bfloat16 if self.hps.bfloat16 else torch.float
-
         self.timesteps_so_far = 0
         self.actor_updates_so_far = 0
         self.qnet_updates_so_far = 0
@@ -66,13 +63,13 @@ class Agent(object):
             actor_net_kwargs.update({"generator": generator})
 
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
-            *actor_net_args, **actor_net_kwargs, device=self.device).to(self.fdtype)
+            *actor_net_args, **actor_net_kwargs, device=self.device)
         self.actor_params = TensorDict.from_module(self.actor, as_module=True)
         self.actor_target = self.actor_params.data.clone()
 
         # discard params of net
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
-            *actor_net_args, **actor_net_kwargs, device="meta").to(self.fdtype)
+            *actor_net_args, **actor_net_kwargs, device="meta")
         self.actor_params.to_module(self.actor)
 
         self.actor_detach = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
@@ -109,13 +106,13 @@ class Agent(object):
         qnet_net_args = [self.ob_shape, self.ac_shape, (256, 256)]
         qnet_net_kwargs = {"layer_norm": self.hps.layer_norm}
 
-        self.qnet1 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device).to(self.fdtype)
-        self.qnet2 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device).to(self.fdtype)
+        self.qnet1 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
+        self.qnet2 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
         self.qnet_params = TensorDict.from_modules(self.qnet1, self.qnet2, as_module=True)
         self.qnet_target = self.qnet_params.data.clone()
 
         # discard params of net
-        self.qnet = Critic(*qnet_net_args, **qnet_net_kwargs, device="meta").to(self.fdtype)
+        self.qnet = Critic(*qnet_net_args, **qnet_net_kwargs, device="meta")
         self.qnet_params.to_module(self.qnet)
 
         # set up the optimizers
@@ -133,7 +130,7 @@ class Agent(object):
 
         if not self.hps.prefer_td3_over_sac:
             # setup log(alpha) if SAC is chosen
-            self.log_alpha = torch.as_tensor(self.hps.alpha_init, device=self.device).log().to(self.fdtype)
+            self.log_alpha = torch.as_tensor(self.hps.alpha_init, device=self.device).log()
 
             if self.hps.autotune:
                 # create learnable Lagrangian multiplier
@@ -183,10 +180,6 @@ class Agent(object):
         action = self.policy_explore(state) if explore else self.policy(state)
         if self.hps.prefer_td3_over_sac:
             action.clamp(self.min_ac, self.max_ac)
-        # return action.cpu().numpy()
-        # return action.view(dtype=torch.uint16).cpu().numpy().view(ml_dtypes.bfloat16)
-        if self.hps.bfloat16:
-            return action.view(dtype=torch.uint16).cpu().numpy()  #.view(ml_dtypes.bfloat16)
         return action.cpu().numpy()
 
     @beartype
@@ -218,9 +211,6 @@ class Agent(object):
                 self.qnet_target, batch["next_observations"], next_action,
             )
 
-            print(next_action.dtype)
-            print(qf_next_target.dtype)
-
             qf_min = qf_next_target.min(0).values
             if self.hps.bcq_style_targ_mix:
                 # use BCQ style of target mixing: soft minimum
@@ -234,14 +224,10 @@ class Agent(object):
                 # add the causal entropy regularization term
                 q_prime -= self.alpha * next_state_log_pi
 
-            print(q_prime.dtype)
-
             # assemble the Bellman target
             targ_q = batch["rewards"].flatten() + (
                 ~batch["dones"].flatten()
-            ).to(self.fdtype) * self.hps.gamma * q_prime.view(-1)
-
-            print(targ_q.dtype)
+            ).float() * self.hps.gamma * q_prime.view(-1)
 
         qf_a_values = torch.vmap(self.batched_qf, (0, None, None, None))(
             self.qnet_params, batch["observations"], batch["actions"], targ_q,

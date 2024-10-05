@@ -50,7 +50,7 @@ def segment(env: Union[Env, VectorEnv],
     assert agent.rb is not None
 
     obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
-    obs = torch.as_tensor(obs, device=device, dtype=agent.fdtype)
+    obs = torch.as_tensor(obs, device=device, dtype=torch.float)
     actions = None  # as long as r is init at 0: ac will be written over
 
     t = 0
@@ -71,16 +71,16 @@ def segment(env: Union[Env, VectorEnv],
         # interact with env
         next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
-        next_obs = torch.as_tensor(next_obs, device=device, dtype=agent.fdtype)
+        next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
         real_next_obs = next_obs.clone()
 
         for idx, trunc in enumerate(np.array(truncations)):
             if trunc:
                 real_next_obs[idx] = torch.as_tensor(
-                    infos["final_observation"][idx], device=device, dtype=agent.fdtype)
+                    infos["final_observation"][idx], device=device, dtype=torch.float)
 
         rewards = rearrange(
-            torch.as_tensor(rewards, device=device, dtype=agent.fdtype),
+            torch.as_tensor(rewards, device=device, dtype=torch.float),
             "b -> b 1",
         )
         terminations = rearrange(
@@ -93,8 +93,8 @@ def segment(env: Union[Env, VectorEnv],
                 {
                     "observations": obs,
                     "next_observations": real_next_obs,
-                    "actions": torch.as_tensor(actions, device=device, dtype=agent.fdtype),
-                    "rewards": torch.as_tensor(rewards, device=device, dtype=agent.fdtype),
+                    "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+                    "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
                     "terminations": terminations,
                     "dones": terminations,
                 },
@@ -138,7 +138,7 @@ def episode(env: Env,
     ob, _ = env.reset(seed=randomize_seed())
     if need_lists:
         obs_list.append(ob)
-    ob = torch.as_tensor(ob, device=device, dtype=agent.fdtype)
+    ob = torch.as_tensor(ob, device=device, dtype=torch.float)
 
     while True:
 
@@ -162,7 +162,7 @@ def episode(env: Env,
             if not done:
                 obs_list.append(new_ob)
 
-        new_ob = torch.as_tensor(new_ob, device=device, dtype=agent.fdtype)
+        new_ob = torch.as_tensor(new_ob, device=device, dtype=torch.float)
         ob = new_ob
 
         if "final_info" in infos:
@@ -206,7 +206,7 @@ def episode(env: Env,
             ob, _ = env.reset(seed=randomize_seed())
             if need_lists:
                 obs_list.append(ob)
-            ob = torch.as_tensor(ob, device=device, dtype=agent.fdtype)
+            ob = torch.as_tensor(ob, device=device, dtype=torch.float)
 
 
 @beartype
