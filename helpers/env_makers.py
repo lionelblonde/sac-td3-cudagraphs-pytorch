@@ -16,8 +16,6 @@ from gymnasium.wrappers.normalize import NormalizeObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.clip_action import ClipAction
 
-import envpool
-
 from gymnasium.spaces import Box
 from dm_control import suite
 from dm_env import specs
@@ -192,7 +190,6 @@ def make_env(env_id: str,
              normalize_observations: bool,
              sync_vec_env: bool,
              num_envs: int,
-             use_envpool: bool,
              video_path: Optional[Path] = None,
              horizon: Optional[int] = None,
     ) -> (tuple[Union[Env, SyncVectorEnv, AsyncVectorEnv],
@@ -210,16 +207,6 @@ def make_env(env_id: str,
                 assert sync_vec_env and (num_envs == 1)
                 env = gym.make(env_id, render_mode="rgb_array")
                 env = RecordVideo(env, str(video_path))
-            elif use_envpool:
-                env = envpool.make(
-                    env_id,
-                    env_type="gymnasium",
-                    num_envs=num_envs,
-                    seed=seed,
-                )
-                env.num_envs = num_envs
-                env.single_action_space = env.action_space
-                env.single_observation_space = env.observation_space
             else:
                 if bench == "dmcs":
                     domain, task = env_id.split("-")
@@ -239,15 +226,12 @@ def make_env(env_id: str,
         return thunk
 
     # create env
-    if use_envpool:
-        env = make_env()()
-    else:
-        env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
-            [
-                make_env() for _ in range(num_envs)
-            ],
-        )
-        env.action_space.seed(seed)  # to be fully reproducible
+    env = (SyncVectorEnv if sync_vec_env else AsyncVectorEnv)(
+        [
+            make_env() for _ in range(num_envs)
+        ],
+    )
+    env.action_space.seed(seed)  # to be fully reproducible
 
     # due diligence checks
     ob_space = env.observation_space

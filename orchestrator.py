@@ -45,14 +45,11 @@ def segment(env: Union[Env, VectorEnv],
             seed: int,
             segment_len: int,
             learning_starts: int,
-            action_repeat: int,
-            *,
-            use_envpool: bool):
+            action_repeat: int):
 
-    if use_envpool:
-        obs, _ = env.reset()
-    else:
-        obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
+    assert agent.rb is not None
+
+    obs, _ = env.reset(seed=seed)  # for the very first reset, we give a seed (and never again)
     obs = torch.as_tensor(obs, device=device, dtype=torch.float)
     actions = None  # as long as r is init at 0: ac will be written over
 
@@ -64,11 +61,7 @@ def segment(env: Union[Env, VectorEnv],
         if r % action_repeat == 0:
             # predict action
             if agent.timesteps_so_far < learning_starts:
-                actions = np.array(
-                    [
-                        env.single_action_space.sample() for _ in range(env.num_envs)
-                    ],
-                )
+                actions = env.action_space.sample()
             else:
                 actions = agent.predict(obs, explore=True)
 
@@ -76,39 +69,41 @@ def segment(env: Union[Env, VectorEnv],
             yield
 
         # interact with env
-        if use_envpool:
-            next_obs, rewards, terminations, _, _ = env.step(actions)
-        else:
-            next_obs, rewards, terminations, truncations, infos = env.step(actions)
+        next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
         next_obs = torch.as_tensor(next_obs, device=device, dtype=torch.float)
         real_next_obs = next_obs.clone()
 
-        if use_envpool:
-            pass
-        else:
-            for idx, trunc in enumerate(truncations):
-                if trunc:
-                    real_next_obs[idx] = torch.as_tensor(
-                        infos["final_observation"][idx], device=device, dtype=torch.float)
+        for idx, trunc in enumerate(np.array(truncations)):
+            if trunc:
+                real_next_obs[idx] = torch.as_tensor(
+                    infos["final_observation"][idx], device=device, dtype=torch.float)
 
-        rewards = rearrange(rewards, "b -> b 1")
-        terminations = rearrange(terminations, "b -> b 1")
-
-        td = TensorDict(
-            {
-                "observations": obs,
-                "next_observations": real_next_obs,
-                "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
-                "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
-                "terminations": terminations,
-                "dones": terminations,
-            },
-            batch_size=obs.shape[0],
-            device=device,
+        rewards = rearrange(
+            torch.as_tensor(rewards, device=device, dtype=torch.float),
+            "b -> b 1",
+        )
+        terminations = rearrange(
+            torch.as_tensor(terminations, device=device, dtype=torch.bool),
+            "b -> b 1",
         )
 
-        agent.rb.extend(td)
+        agent.rb.extend(
+            [
+                TensorDict(
+                    {
+                        "observations": obs,
+                        "next_observations": real_next_obs,
+                        "actions": torch.as_tensor(actions, device=device, dtype=torch.float),
+                        "rewards": torch.as_tensor(rewards, device=device, dtype=torch.float),
+                        "terminations": terminations,
+                        "dones": terminations,
+                    },
+                    batch_size=obs.shape[0],
+                    device=device,
+                ),
+            ],
+        )
 
         obs = next_obs
 
@@ -122,7 +117,6 @@ def episode(env: Env,
             device: torch.device,
             seed: int,
             *,
-            use_envpool: bool,
             need_lists: bool = False):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
@@ -143,10 +137,7 @@ def episode(env: Env,
     ep_len = 0
     ep_ret = 0
 
-    if use_envpool:
-        ob, _ = env.reset()
-    else:
-        ob, _ = env.reset(seed=randomize_seed())
+    ob, _ = env.reset(seed=randomize_seed())
     if need_lists:
         obs_list.append(ob)
     ob = torch.as_tensor(ob, device=device, dtype=torch.float)
@@ -214,10 +205,7 @@ def episode(env: Env,
             ep_len = 0
             ep_ret = 0
 
-            if use_envpool:
-                ob, _ = env.reset()
-            else:
-                ob, _ = env.reset(seed=randomize_seed())
+            ob, _ = env.reset(seed=randomize_seed())
             if need_lists:
                 obs_list.append(ob)
             ob = torch.as_tensor(ob, device=device, dtype=torch.float)
@@ -234,6 +222,8 @@ def train(cfg: DictConfig,
     assert isinstance(cfg, DictConfig)
 
     agent = agent_wrapper()
+
+    assert agent.rb is not None
 
     # set up model save directory
     ckpt_dir = Path(cfg.checkpoint_dir) / name
@@ -277,10 +267,9 @@ def train(cfg: DictConfig,
         cfg.segment_len,
         cfg.learning_starts,
         cfg.action_repeat,
-        use_envpool=cfg.use_envpool,
     )
     # create episode generator for evaluating the agent
-    ep_gen = episode(eval_env, agent, device, cfg.seed, use_envpool=cfg.use_envpool)
+    ep_gen = episode(eval_env, agent, device, cfg.seed)
 
     i = 0
     start_time = None
@@ -423,9 +412,7 @@ def evaluate(cfg: DictConfig,
 
     # create episode generator
     ep_gen = episode(
-        env, agent, device, cfg.seed,
-        use_envpool=cfg.use_envpool,
-        need_lists=cfg.gather_trajectories)
+        env, agent, device, cfg.seed, need_lists=cfg.gather_trajectories)
 
     pbar = tqdm.tqdm(range(cfg.num_episodes))
     pbar.set_description("evaluating")
