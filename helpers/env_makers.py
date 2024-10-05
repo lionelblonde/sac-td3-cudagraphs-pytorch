@@ -18,6 +18,59 @@ from gymnasium.wrappers.clip_action import ClipAction
 import envpool
 
 
+BENCHMARKS = {
+    "farama_mujoco": [
+        f"{name}-v4" for name in
+        [
+            "Ant",
+            "HalfCheetah",
+            "Hopper",
+            "HumanoidStandup",
+            "Humanoid",
+            "InvertedDoublePendulum",
+            "InvertedPendulum",
+            "Pusher",
+            "Reacher",
+            "Swimmer",
+            "Walker2d",
+        ]
+    ],
+    "deepmind_mujoco": [
+        f"{name}-Feat-v0" for name in [
+            "Hopper-Hop",
+            "Cheetah-Run",
+            "Walker-Walk",
+            "Walker-Run",
+            "Stacker-Stack_2",
+            "Stacker-Stack_4",
+            "Humanoid-Walk",
+            "Humanoid-Run",
+            "Humanoid-Run_Pure_State",
+            "Humanoid_CMU-Stand",
+            "Humanoid_CMU-Run",
+            "Quadruped-Walk",
+            "Quadruped-Run",
+            "Quadruped-Escape",
+            "Quadruped-Fetch",
+            "Dog-Run",
+            "Dog-Fetch",
+        ]
+    ],
+}
+
+
+@beartype
+def get_benchmark(env_id: str) -> str:
+    # verify that the specified env is amongst the admissible ones
+    benchmark = None
+    for k, v in BENCHMARKS.items():
+        if env_id in v:
+            benchmark = k
+            continue
+    assert benchmark is not None, "unsupported environment"
+    return benchmark
+
+
 @beartype
 def make_env(env_id: str,
              seed: int,
@@ -34,6 +87,8 @@ def make_env(env_id: str,
           np.ndarray,
           np.ndarray]):
 
+    bench = get_benchmark(env_id)
+
     def make_env() -> Callable[[], Env]:
         def thunk() -> Env:
             if video_path is not None:
@@ -46,7 +101,6 @@ def make_env(env_id: str,
                     env_type="gymnasium",
                     num_envs=num_envs,
                     seed=seed,
-                    frame_skip=1,
                 )
                 env.num_envs = num_envs
                 env.single_action_space = env.action_space
