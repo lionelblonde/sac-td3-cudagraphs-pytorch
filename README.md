@@ -152,3 +152,7 @@ Here is how it can be used:
 ```bash
 python spawner.py --cfg="tasks/defaults/sac.yml" --conda_env="ptfarama" --env_bundle="low" --deployment="slurm" --num_seeds=3 --caliber="long" --deploy_now
 ```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
