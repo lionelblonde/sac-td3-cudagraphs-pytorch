@@ -1,5 +1,1 @@
 pip install einops beartype fire omegaconf pandas matplotlib seaborn numpy pyyaml lockfile imageio moviepy tmuxp opencv-python wandb torch gymnasium dm_control tensordict-nightly torchrl-nightly
-
-# for local machine with editor needing lsp linter and type-checker:
-pip install ruff-lsp python-lsp-server pycodestyle
-
