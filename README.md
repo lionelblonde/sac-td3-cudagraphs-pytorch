@@ -153,6 +153,9 @@ Here is how it can be used:
 python spawner.py --cfg="tasks/defaults/sac.yml" --conda_env="ptfarama" --env_bundle="low" --deployment="slurm" --num_seeds=3 --caliber="long" --deploy_now
 ```
 
+To create the scripts _without_ deploying them immediately, use `--nodeploy_now` instead of `--deploy_now`.
+This logic applies to all the boolean options since we are using [google/python-fire](https://github.com/google/python-fire).
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
