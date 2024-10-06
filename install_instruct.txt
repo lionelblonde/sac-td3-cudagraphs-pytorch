@@ -1,1 +1,0 @@
-pip install einops beartype fire omegaconf pandas matplotlib seaborn numpy pyyaml lockfile imageio moviepy tmuxp opencv-python wandb torch gymnasium dm_control tensordict-nightly torchrl-nightly
