@@ -1,0 +1,11 @@
+einops
+beartype
+fire
+omegaconf
+numpy
+tmuxp
+wandb
+gymnasium
+dm_control
+tensordict-nightly
+torchrl-nightly
