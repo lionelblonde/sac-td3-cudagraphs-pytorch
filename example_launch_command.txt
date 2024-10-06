@@ -1,1 +1,0 @@
-python -O main.py train --cfg="tasks/defaults/sac.yml" --env_id="Walker2d-v4" --seed=0
