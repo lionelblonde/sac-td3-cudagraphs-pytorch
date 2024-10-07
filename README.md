@@ -20,7 +20,6 @@ You can set up the project using either **Conda** or **Docker**.
 
 ### Using Conda
 
-
 #### Step 1: Clone the Repository
 
 ```bash
@@ -150,7 +149,7 @@ or locally in a new `tmux` session, with one experiment running per window in th
 Here is how it can be used:
 
 ```bash
-python spawner.py --cfg="tasks/defaults/sac.yml" --conda_env="ptfarama" --env_bundle="low" --deployment="slurm" --num_seeds=3 --caliber="long" --deploy_now
+python spawner.py --cfg="tasks/defaults/sac.yml" --conda_env="sac_td3_cuda" --env_bundle="low" --deployment="slurm" --num_seeds=3 --caliber="long" --deploy_now
 ```
 
 To create the scripts _without_ deploying them immediately, use `--nodeploy_now` instead of `--deploy_now`.
