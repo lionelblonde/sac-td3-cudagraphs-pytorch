@@ -147,7 +147,7 @@ class Spawner(object):
         return hpmap_
 
     @beartype
-    def get_hps(self):
+    def get_hps(self) -> list[dict[str, Any]]:
         """Return a list of maps of hyperparameters"""
 
         # assemble the hyperparameter map
