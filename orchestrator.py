@@ -2,7 +2,7 @@ import os
 import time
 import tqdm
 from pathlib import Path
-from typing import Union, Callable
+from typing import Union, Callable, Generator
 from contextlib import contextmanager
 from collections import deque
 
@@ -44,7 +44,8 @@ def segment(env: Union[Env, VectorEnv],
             seed: int,
             segment_len: int,
             learning_starts: int,
-            action_repeat: int):
+            action_repeat: int,
+    ) -> Generator[None, None, None]:
 
     assert agent.rb is not None
 
@@ -121,9 +122,10 @@ def episode(env: Env,
             agent: Agent,
             seed: int,
             *,
-            need_lists: bool = False):
+            need_lists: bool = False,
+    ) -> Generator[dict[str, np.ndarray], None, None]:
     # generator that spits out a trajectory collected during a single episode
-    
+
     # `append` operation is significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
 
@@ -156,7 +158,7 @@ def episode(env: Env,
                 device=agent.device,
             ),
             explore=False,
-        )   
+        )
 
         new_ob, reward, termination, truncation, infos = env.step(action)
 
