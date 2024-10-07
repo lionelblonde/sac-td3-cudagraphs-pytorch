@@ -429,8 +429,8 @@ def evaluate(cfg: DictConfig,
 
     with torch.no_grad():
         eval_metrics = {
-            "length": torch.tensor(list(len_list), dtype=torch.float).mean(),
-            "return": torch.tensor(list(ret_list), dtype=torch.float).mean(),
+            "length": torch.tensor(np.array(len_list), dtype=torch.float).mean(),
+            "return": torch.tensor(np.array(ret_list), dtype=torch.float).mean(),
         }
 
     # log with logger
