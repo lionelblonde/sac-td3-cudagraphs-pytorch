@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Callable
+from typing import Callable, Union
 
 from beartype import beartype
 from einops import pack
@@ -58,7 +58,7 @@ class Critic(nn.Module):
                  hid_dims: tuple[int, int],
                  *,
                  layer_norm: bool,
-                 device: torch.device):
+                 device: Union[str, torch.device]):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
@@ -104,7 +104,7 @@ class Actor(nn.Module):
                  *,
                  exploration_noise: float,
                  layer_norm: bool,
-                 device: torch.device):
+                 device: Union[str, torch.device]):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
@@ -164,7 +164,7 @@ class TanhGaussActor(nn.Module):
                  *,
                  generator: torch.Generator,
                  layer_norm: bool,
-                 device: torch.device):
+                 device: Union[str, torch.device]):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
