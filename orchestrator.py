@@ -62,7 +62,15 @@ def segment(env: Union[Env, VectorEnv],
             if agent.timesteps_so_far < learning_starts:
                 actions = env.action_space.sample()
             else:
-                actions = agent.predict(obs, explore=True)
+                actions = agent.predict(
+                    TensorDict(
+                        {
+                            "observations": obs,
+                        },
+                        device=agent.device,
+                    ),
+                    explore=True,
+                )
 
         if t > 0 and t % segment_len == 0:
             yield
@@ -141,7 +149,15 @@ def episode(env: Env,
     while True:
 
         # predict action
-        action = agent.predict(ob, explore=False)
+        action = agent.predict(
+            TensorDict(
+                {
+                    "observations": ob,
+                },
+                device=agent.device,
+            ),
+            explore=False,
+        )
 
         if need_lists:
             actions_list.append(action)

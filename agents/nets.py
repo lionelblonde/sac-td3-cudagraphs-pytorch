@@ -27,7 +27,7 @@ def log_module_info(model: nn.Module):
 
     logger.info("logging model specs")
     logger.info(model)
-    num_params = sum([p.numel() for p in model.parameters() if p.requires_grad])
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"total trainable params: {_fmt(num_params)}.")
 
 
@@ -215,7 +215,7 @@ class TanhGaussActor(nn.Module):
         return mean, std
 
     @beartype
-    def get_action(self, ob: torch.Tensor):
+    def get_action(self, ob: torch.Tensor) -> dict[str, torch.Tensor]:
         mean, std = self(ob)
         normal = Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
@@ -226,4 +226,4 @@ class TanhGaussActor(nn.Module):
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
         log_prob = log_prob.sum(1, keepdim=True)
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean
+        return {"sample": action, "log_prob": log_prob, "mode": mean}

@@ -29,7 +29,7 @@ class Agent(object):
                  hps: DictConfig,
                  generator: torch.Generator,
                  rb: Optional[ReplayBuffer] = None):
-        self.ob_shape, self.ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
+        ob_shape, ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
 
         self.device = device
 
@@ -54,8 +54,7 @@ class Agent(object):
 
         # create online and target nets
 
-        actor_net_args = [
-            self.ob_shape, self.ac_shape, (256, 256), self.min_ac, self.max_ac]
+        actor_net_args = [ob_shape, ac_shape, (256, 256), self.min_ac, self.max_ac]
         actor_net_kwargs = {"layer_norm": self.hps.layer_norm}
         if self.hps.prefer_td3_over_sac:
             actor_net_kwargs.update({"exploration_noise": self.hps.actor_noise_std})
@@ -71,7 +70,6 @@ class Agent(object):
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
             *actor_net_args, **actor_net_kwargs, device="meta")
         self.actor_params.to_module(self.actor)
-
         self.actor_detach = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
             *actor_net_args, **actor_net_kwargs, device=self.device)
         # copy params to actor_detach without grad
@@ -79,31 +77,31 @@ class Agent(object):
         if self.hps.prefer_td3_over_sac:
             self.policy = TensorDictModule(
                 self.actor_detach,
-                in_keys=["observation"],
+                in_keys=["observations"],
                 out_keys=["action"],
             )
             self.policy_explore = TensorDictModule(
                 self.actor_detach.explore,
-                in_keys=["observation"],
+                in_keys=["observations"],
                 out_keys=["action"],
             )
         else:
             self.policy = TensorDictModule(
                 self.actor_detach.get_action,
-                in_keys=["observation"],
-                out_keys=["mean"],  # mode
+                in_keys=["observations"],
+                out_keys=["mode"],  # mode
             )
             self.policy_explore = TensorDictModule(
                 self.actor_detach.get_action,
-                in_keys=["observation"],
-                out_keys=["action"],  # sample
+                in_keys=["observations"],
+                out_keys=["sample"],  # sample
             )
 
         if self.hps.compile:
             self.policy = torch.compile(self.policy, mode=None)
             self.policy_explore = torch.compile(self.policy_explore, mode=None)
 
-        qnet_net_args = [self.ob_shape, self.ac_shape, (256, 256)]
+        qnet_net_args = [ob_shape, ac_shape, (256, 256)]
         qnet_net_kwargs = {"layer_norm": self.hps.layer_norm}
 
         self.qnet1 = Critic(*qnet_net_args, **qnet_net_kwargs, device=self.device)
@@ -136,7 +134,7 @@ class Agent(object):
                 # create learnable Lagrangian multiplier
                 # common trick: learn log(alpha) instead of alpha directly
                 self.log_alpha.requires_grad = True
-                self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
+                self.targ_ent = -ac_shape[-1]  # set target entropy to -|A|
                 self.alpha_optimizer = Adam(
                     [self.log_alpha],
                     lr=self.hps.log_alpha_lr,
@@ -175,11 +173,14 @@ class Agent(object):
         return None
 
     @beartype
-    def predict(self, state: torch.Tensor, *, explore: bool) -> np.ndarray:
-        """Predict an action, with or without perturbation"""
-        action = self.policy_explore(state) if explore else self.policy(state)
+    def predict(self, in_td: TensorDict, *, explore: bool) -> np.ndarray:
+        """Predict with policy, with or without perturbation"""
+        out_td = self.policy_explore(in_td) if explore else self.policy(in_td)
         if self.hps.prefer_td3_over_sac:
+            action = out_td["actions"]
             action.clamp(self.min_ac, self.max_ac)
+        else:
+            action = out_td["sample" if explore else "mode"]
         return action.cpu().numpy()
 
     @beartype
@@ -205,7 +206,7 @@ class Agent(object):
             else:
                 # using SAC
                 next_action, next_state_log_pi, _ = self.actor.get_action(
-                    batch["next_observations"])
+                    batch["next_observations"]).values()
 
             qf_next_target = torch.vmap(self.batched_qf, (0, None, None))(
                 self.qnet_target, batch["next_observations"], next_action,
@@ -255,7 +256,8 @@ class Agent(object):
             action_from_actor = self.actor(batch["observations"])
         else:
             # using SAC
-            action_from_actor, state_log_pi, _ = self.actor.get_action(batch["observations"])
+            action_from_actor, state_log_pi, _ = self.actor.get_action(
+                batch["observations"]).values()
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -300,7 +302,8 @@ class Agent(object):
         if self.hps.autotune:
             self.alpha_optimizer.zero_grad()
             with torch.no_grad():
-                _, state_log_pi, _ = self.actor.get_action(batch["observations"])
+                _, state_log_pi, _ = self.actor.get_action(
+                    batch["observations"]).values()
             alpha_loss = (self.alpha * (-state_log_pi - self.targ_ent).detach()).mean()  # alpha
 
             alpha_loss.backward()

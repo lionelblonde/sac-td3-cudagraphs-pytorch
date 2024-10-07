@@ -58,7 +58,8 @@ class MagicRunner(object):
     LOGGER_LEVEL: int = logger.WARN
 
     @beartype
-    def __init__(self, cfg: str,  # give the relative path to cfg here
+    def __init__(self,
+                 cfg: str,  # give the relative path to cfg here
                  env_id: str,  # never in cfg: always give one in arg
                  seed: int,  # never in cfg: always give one in arg
                  wandb_project: Optional[str] = None,  # is either given in arg (prio) or in cfg
@@ -72,7 +73,7 @@ class MagicRunner(object):
         proj_root = Path(__file__).resolve().parent
         _cfg = OmegaConf.load(proj_root / Path(cfg))
         assert isinstance(_cfg, DictConfig)
-        self._cfg: DictConfig = _cfg  # for the type-checker
+        self._cfg: DictConfig = _cfg  # for the type checker
 
         logger.info("the config loaded:")
         logger.info(OmegaConf.to_yaml(self._cfg))
@@ -157,7 +158,6 @@ class MagicRunner(object):
         eval_env, _, _, _ = make_env(
             self._cfg.env_id,
             self._cfg.seed,
-            # self._cfg.seed + 1234,
             normalize_observations=self._cfg.normalize_observations,
             sync_vec_env=True,
             num_envs=1,
