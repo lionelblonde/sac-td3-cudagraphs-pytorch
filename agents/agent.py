@@ -121,7 +121,7 @@ class Agent(object):
             capturable=self.hps.cudagraphs and not self.hps.compile,
         )
         self.actor_optimizer = Adam(
-            list(self.actor.parameters()),
+            self.actor.parameters(),
             lr=self.hps.actor_lr,
             capturable=self.hps.cudagraphs and not self.hps.compile,
         )
