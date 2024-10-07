@@ -24,8 +24,8 @@ from helpers import logger
 from agents.agent import Agent
 
 
-@beartype
 @contextmanager
+@beartype
 def timed(op: str, timer: Callable[[], float]):
     logger.info(colored(
         f"starting timer | op: {op}",
@@ -123,7 +123,8 @@ def episode(env: Env,
             *,
             need_lists: bool = False):
     # generator that spits out a trajectory collected during a single episode
-    # `append` operation is also significantly faster on lists than numpy arrays,
+    
+    # `append` operation is significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
 
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
@@ -138,8 +139,6 @@ def episode(env: Env,
     rewards_list = []
     terminations_list = []
     dones_list = []
-    ep_len = 0
-    ep_ret = 0
 
     ob, _ = env.reset(seed=randomize_seed())
     if need_lists:
@@ -157,22 +156,18 @@ def episode(env: Env,
                 device=agent.device,
             ),
             explore=False,
-        )
-
-        if need_lists:
-            actions_list.append(action)
+        )   
 
         new_ob, reward, termination, truncation, infos = env.step(action)
-
-        ep_len += 1
-        ep_ret += np.array(reward).item()
 
         done = termination or truncation
 
         if need_lists:
-            dones_list.append(done)
-            rewards_list.append(reward)
             next_obs_list.append(new_ob)
+            actions_list.append(action)
+            rewards_list.append(reward)
+            terminations_list.append(termination)
+            dones_list.append(done)
             if not done:
                 obs_list.append(new_ob)
 
@@ -182,12 +177,8 @@ def episode(env: Env,
         if "final_info" in infos:
             # we have len(infos["final_info"]) == 1
             for info in infos["final_info"]:
-                ep_len_ = float(info["episode"]["l"].item())
-                ep_ret_ = float(info["episode"]["r"].item())
-                assert ep_len_ == ep_len
-                assert ep_ret_ == ep_ret
-
-        if done:
+                ep_len = float(info["episode"]["l"].item())
+                ep_ret = float(info["episode"]["r"].item())
 
             if need_lists:
                 out = {
@@ -197,12 +188,12 @@ def episode(env: Env,
                     "rewards": np.array(rewards_list),
                     "terminations": np.array(terminations_list),
                     "dones": np.array(dones_list),
-                    "length": ep_len,
+                    "length": np.array(ep_len),
                     "return": np.array(ep_ret),
                 }
             else:
                 out = {
-                    "length": ep_len,
+                    "length": np.array(ep_len),
                     "return": np.array(ep_ret),
                 }
             yield out
@@ -214,8 +205,6 @@ def episode(env: Env,
                 rewards_list = []
                 terminations_list = []
                 dones_list = []
-            ep_len = 0
-            ep_ret = 0
 
             ob, _ = env.reset(seed=randomize_seed())
             if need_lists:
@@ -269,10 +258,10 @@ def train(cfg: DictConfig,
             time.sleep(pause)
     logger.info("wandb co established!")
 
-    # create segment generator for training the agent
-    roll_gen = segment(
+    # create segment generator for training
+    seg_gen = segment(
         env, agent, cfg.seed, cfg.segment_len, cfg.learning_starts, cfg.action_repeat)
-    # create episode generator for evaluating the agent
+    # create episode generator for evaluating
     ep_gen = episode(eval_env, agent, cfg.seed)
 
     i = 0
@@ -304,7 +293,7 @@ def train(cfg: DictConfig,
             measure_burnin = agent.timesteps_so_far
 
         logger.info(("interact").upper())
-        next(roll_gen)
+        next(seg_gen)
         agent.timesteps_so_far += (increment := cfg.segment_len * cfg.num_envs)
         pbar.update(increment)
 
