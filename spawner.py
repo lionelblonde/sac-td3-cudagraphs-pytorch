@@ -39,7 +39,7 @@ ENV_BUNDLES: dict[str, list[str]] = {
 # for each environment bundle, set the GPU mem to request
 GPU_MEM_MAP: dict[str, int] = {
     "debug": 10,
-    "low": 2,
+    "low": 10,
     "medium": 10,
     "high": 20,
 }
@@ -130,8 +130,6 @@ class Spawner(object):
         # also use the bundle name to determine the GPU memory to request
         self.gpu_memory = GPU_MEM_MAP[env_bundle]
 
-        self.num_env = self._cfg.num_env
-
     @staticmethod
     @beartype
     def copy_and_add_seed(hpmap: dict[str, Any], seed: int) -> dict[str, Any]:
@@ -203,7 +201,7 @@ class Spawner(object):
                                 f"#SBATCH --partition={self.partition}\n"
                                 f"#SBATCH --nodes=1\n"
                                 f"#SBATCH --ntasks=1\n"
-                                f"#SBATCH --cpus-per-task={self._cfg.num_env}\n"
+                                f"#SBATCH --cpus-per-task={self._cfg.num_envs}\n"
                                 f"#SBATCH --time={self.duration}\n"
                                 f"#SBATCH --mem={MEMORY}000\n"
                                 "#SBATCH --output=./out/run_%j.out\n")
