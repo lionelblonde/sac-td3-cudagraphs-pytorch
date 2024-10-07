@@ -419,6 +419,9 @@ def evaluate(cfg: DictConfig,
         ret_list.append(ep_ret := ep["return"])
 
         if trajectory_path is not None:
+            # verify that all the arrays have the same length
+            for k, v in ep.items():
+                assert v.shape[0] == ep_len, f"wrong array length for {k=}"
             name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
             td = TensorDict(ep)
             fname = trajectory_path / f"{name}.h5"
