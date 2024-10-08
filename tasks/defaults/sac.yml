@@ -21,8 +21,8 @@ eval_steps: 10
 eval_every: 10000
 
 # evaluation mode
-num_episodes: 10
-gather_trajectories: false
+num_episodes: 16
+gather_trajectories: true
 
 # model
 layer_norm: false
