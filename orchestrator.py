@@ -424,7 +424,7 @@ def evaluate(cfg: DictConfig,
             # verify that all the arrays have the same length
             for k, v in ep.items():
                 assert v.shape[0] == ep_len, f"wrong array length for {k=}"
-            name = f"{str(i).zfill(3)}_L{ep_len}_R{ep_ret}"
+            name = f"{str(i).zfill(3)}_L{int(ep_len)}_R{int(ep_ret)}"
             td = TensorDict(ep)
             fname = trajectory_path / f"{name}.h5"
             td.to_h5(fname)  # can then easily load with `from_h5`
