@@ -295,7 +295,7 @@ class Agent(object):
         if self.hps.prefer_td3_over_sac:
             return TensorDict(
                 {
-                    "loss/actor": actor_loss.detach(),
+                    "loss/actor_loss": actor_loss.detach(),
                 },
             )
 
