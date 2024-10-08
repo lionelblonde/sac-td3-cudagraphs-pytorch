@@ -426,6 +426,10 @@ def evaluate(cfg: DictConfig,
                 assert v.shape[0] == ep_len, f"wrong array length for {k=}"
             name = f"{str(i).zfill(3)}_L{int(ep_len)}_R{int(ep_ret)}"
             td = TensorDict(ep)
+            for k, v in td.items():
+                if v.dtype == torch.float64:
+                    # convert from float64 to float32
+                    td[k] = v.float()
             fname = trajectory_path / f"{name}.h5"
             td.to_h5(fname)  # can then easily load with `from_h5`
 
