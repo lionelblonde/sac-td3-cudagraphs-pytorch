@@ -76,7 +76,7 @@ class Agent(object):
         TensorDict.from_module(self.actor).data.to_module(self.actor_detach)
         if self.hps.prefer_td3_over_sac:
             self.policy = TensorDictModule(
-                self.actor_detach,
+                self.actor_detach.exploit,
                 in_keys=["observations"],
                 out_keys=["action"],
             )
@@ -177,7 +177,7 @@ class Agent(object):
         """Predict with policy, with or without perturbation"""
         out_td = self.policy_explore(in_td) if explore else self.policy(in_td)
         if self.hps.prefer_td3_over_sac:
-            action = out_td["actions"]
+            action = out_td["action"]
             action.clamp(self.min_ac, self.max_ac)
         else:
             action = out_td["sample" if explore else "mode"]
