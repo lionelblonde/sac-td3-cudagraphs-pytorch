@@ -33,8 +33,8 @@ class Agent(object):
 
         self.device = device
 
-        self.min_ac = torch.tensor(min_ac, dtype=torch.float32, device=self.device)
-        self.max_ac = torch.tensor(max_ac, dtype=torch.float32, device=self.device)
+        self.min_ac = torch.tensor(min_ac, dtype=torch.float, device=self.device)
+        self.max_ac = torch.tensor(max_ac, dtype=torch.float, device=self.device)
 
         assert isinstance(hps, DictConfig)
         self.hps = hps
