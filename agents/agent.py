@@ -117,7 +117,7 @@ class Agent(object):
 
         self.q_optimizer = Adam(
             self.qnet.parameters(),
-            lr=self.hps.crit_lr,
+            lr=self.hps.qnets_lr,
             capturable=self.hps.cudagraphs and not self.hps.compile,
         )
         self.actor_optimizer = Adam(
