@@ -147,12 +147,12 @@ class Actor(nn.Module):
         return torch.tanh(x) * self.action_scale + self.action_bias
 
     @beartype
-    def exploit(self, ob: torch.tensor) -> dict[str, torch.tensor]:
+    def exploit(self, ob: torch.Tensor) -> dict[str, torch.Tensor]:
         ac = self(ob)
         return {"action": ac}
 
     @beartype
-    def explore(self, ob: torch.tensor) -> dict[str, torch.tensor]:
+    def explore(self, ob: torch.Tensor) -> dict[str, torch.Tensor]:
         ac = self(ob)
         return {
             "action": ac + torch.randn_like(ac).mul(self.action_scale * self.exploration_noise),
