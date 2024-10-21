@@ -238,8 +238,6 @@ class Agent(object):
         qf_loss.backward()
         self.q_optimizer.step()
 
-        self.qnet_updates_so_far += 1
-
         return TensorDict(
             {
                 "loss/qf_loss": qf_loss.detach(),
@@ -289,8 +287,6 @@ class Agent(object):
         if self.hps.clip_norm > 0:
             clip_grad.clip_grad_norm_(self.actor.parameters(), self.hps.clip_norm)
         self.actor_optimizer.step()
-
-        self.actor_updates_so_far += 1
 
         if self.hps.prefer_td3_over_sac:
             return TensorDict(

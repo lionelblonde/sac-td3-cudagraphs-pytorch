@@ -312,12 +312,14 @@ def train(cfg: DictConfig,
 
         # update qnets
         tlog.update(tc_update_qnets(batch))
+        agent.qnet_updates_so_far += 1
 
         # update actor (and alpha)
         if i % (cfg.actor_update_delay + 1) == 0:  # eval freq even number
             # compensate for delay: wait X rounds, do X updates
             for _ in range(cfg.actor_update_delay):
                 tlog.update(tc_update_actor(batch))
+                agent.actor_updates_so_far += 1
 
         # update the target networks
         agent.update_targ_nets()
