@@ -40,7 +40,7 @@ Avoid Mambaforge as it is deprecated as of July 2024.
 #### Step 3: Create a New Conda Environment
 
 ```bash
-conda create -n sac_td3_cuda python=3.8
+conda create -n sac_td3_cuda python=3.10
 conda activate sac_td3_cuda
 ```
 
