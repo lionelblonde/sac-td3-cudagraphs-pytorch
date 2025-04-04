@@ -5,7 +5,7 @@ cudagraphs: true
 
 # env
 sync_vec_env: true
-num_envs: 8
+num_envs: 4
 action_repeat: 1
 capture_video: false
 normalize_observations: false
@@ -25,7 +25,7 @@ num_episodes: 16
 gather_trajectories: true
 
 # model
-layer_norm: false
+layer_norm: true
 
 # optimization
 actor_lr: 3e-4
