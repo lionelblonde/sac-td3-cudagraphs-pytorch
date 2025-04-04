@@ -77,7 +77,7 @@ export MUJOCO_GL=egl
 #### Step 0: Prerequisites
 
 * __Docker__ installed on your machine
-* __NVIDIA Container Toolkit__ for GPU support[Installation guide](
+* __NVIDIA Container Toolkit__ for GPU support; [Installation guide](
 https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
 #### Step 1: Clone the Repository
