@@ -40,11 +40,13 @@ BENCHMARKS = {
     ],
     "dmcs": [
         f"{name}" for name in [  # leave like this
+            "cartpole-swingup",  # this
             "hopper-hop",
-            "walker-walk",
+            "walker-walk",  # this
             "walker-run",
             "cheetah-walk",
-            "humanoid-walk",
+            "cheetah-run",  # this
+            "humanoid-walk",  # this
             "humanoid-run",
             "humanoid_CMU-walk",
             "humanoid_CMU-run",
@@ -54,6 +56,7 @@ BENCHMARKS = {
             "quadruped-run",
             "quadruped-escape",
             "quadruped-fetch",
+            "finger-spin",  # this
             "dog-run",
             "dog-fetch",
         ]
@@ -113,8 +116,8 @@ class DeepMindControlSuite(Env):
             mn, mx = extract_min_max(s)
             mins.append(mn)
             maxs.append(mx)
-        low = np.concatenate(mins, axis=0).astype(np.float32)
-        high = np.concatenate(maxs, axis=0).astype(np.float32)
+        low = np.asarray(np.concatenate(mins, axis=0), dtype=np.float32)
+        high = np.asarray(np.concatenate(maxs, axis=0), dtype=np.float32)
         assert low.shape == high.shape
         return Box(low, high, dtype=np.float32)
 
@@ -123,7 +126,7 @@ class DeepMindControlSuite(Env):
     def flatten_obs(obs: dict[str, np.ndarray]) -> np.ndarray:
         obs_pieces = []
         for v in obs.values():
-            flat = np.array([v]) if np.isscalar(v) else v.ravel()
+            flat = np.array([v], copy=True) if np.isscalar(v) else v.ravel()
             obs_pieces.append(flat)
         return np.concatenate(obs_pieces, axis=0).astype(np.float32)
 
