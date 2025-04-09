@@ -9,14 +9,16 @@ import gymnasium as gym
 import gymnasium_robotics  # noqa
 
 from gymnasium.core import Env
-from gymnasium.wrappers.time_limit import TimeLimit
-from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from gymnasium.vector.sync_vector_env import SyncVectorEnv
 from gymnasium.vector.async_vector_env import AsyncVectorEnv
-from gymnasium.wrappers.record_video import RecordVideo
-from gymnasium.wrappers.normalize import NormalizeObservation
-from gymnasium.wrappers.transform_observation import TransformObservation
-from gymnasium.wrappers.clip_action import ClipAction
+from gymnasium.wrappers import (
+    TimeLimit,
+    RecordEpisodeStatistics,
+    RecordVideo,
+    NormalizeObservation,
+    TransformObservation,
+    ClipAction,
+)
 
 from gymnasium.spaces import Box
 from dm_control import suite
