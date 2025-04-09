@@ -6,6 +6,8 @@ from beartype import beartype
 import numpy as np
 
 import gymnasium as gym
+import gymnasium_robotics  # noqa
+
 from gymnasium.core import Env
 from gymnasium.wrappers.time_limit import TimeLimit
 from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
