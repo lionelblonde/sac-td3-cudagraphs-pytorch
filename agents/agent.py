@@ -363,7 +363,7 @@ class Agent(object):
     @beartype
     def load_from_disk(self, path: Path):
         """Load another agent into this one"""
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, weights_only=False)
         if "timesteps_so_far" in checkpoint:
             self.timesteps_so_far = checkpoint["timesteps_so_far"]
         # the "strict" argument of `load_state_dict` is True by default
