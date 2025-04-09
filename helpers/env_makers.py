@@ -105,13 +105,15 @@ class DeepMindControlSuite(Env):
         ) -> tuple[np.ndarray, np.ndarray]:
             assert s.dtype == np.float32
             dim = int(np.prod(s.shape))
-            if type(s) is specs.Array:
-                bound = np.inf * np.ones(dim, dtype=np.float32)
-                return -bound, bound
-            if type(s) is specs.BoundedArray:
-                zeros = np.zeros(dim, dtype=np.float32)
-                return s.minimum + zeros, s.maximum + zeros
-            raise TypeError("unrecognized type")
+            match s:
+                case specs.BoundedArray():
+                    zeros = np.zeros(dim, dtype=np.float32)
+                    return s.minimum + zeros, s.maximum + zeros
+                case specs.Array():
+                    bound = np.inf * np.ones(dim, dtype=np.float32)
+                    return -bound, bound
+                case _:
+                    raise TypeError("unrecognized type")
 
         mins, maxs = [], []
         for s in spec:
