@@ -46,11 +46,11 @@ BENCHMARKS = {
         f"{name}" for name in [  # leave like this
             "cartpole-swingup",  # this
             "hopper-hop",
-            "walker-walk",  # this
+            "walker-walk",
             "walker-run",
             "cheetah-walk",
-            "cheetah-run",  # this
-            "humanoid-walk",  # this
+            "cheetah-run",
+            "humanoid-walk",
             "humanoid-run",
             "humanoid_CMU-walk",
             "humanoid_CMU-run",
@@ -60,9 +60,14 @@ BENCHMARKS = {
             "quadruped-run",
             "quadruped-escape",
             "quadruped-fetch",
-            "finger-spin",  # this
+            "finger-spin",
             "dog-run",
             "dog-fetch",
+            "stacker-stack_2",
+            "reacher-easy",
+            "reacher-hard",
+            "ball_in_cup-catch",
+            "manipulator-insert_ball",
         ]
     ],
 }
