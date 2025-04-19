@@ -84,7 +84,6 @@ class DeepMindControlSuite(Env):
                  task_name: str,
                  /,
                  *,
-                 jitter_scale: float = 0.4,
                  rendering: str = "egl",
                  render_height: int = 64,
                  render_width: int = 64,
@@ -93,34 +92,6 @@ class DeepMindControlSuite(Env):
         # for details see https://github.com/deepmind/dm_control
         assert rendering in {"glfw", "egl", "osmesa"}
         os.environ["MUJOCO_GL"] = rendering
-
-        self.jitter_scale = jitter_scale
-        if jitter_scale < 1.0:
-
-            class ScaledRandom:
-                def __init__(self, scale: float, base: np.random.RandomState = None):
-                    self.scale = scale
-                    # if no base given, seed from fresh entropy
-                    self.base = base or np.random.RandomState()
-
-                def uniform(self, low, high=None, size=None):
-                    # base returns in [low,high); we compress towards low
-                    out = self.base.uniform(low, high, size)
-                    return low + (out - low) * self.scale
-
-                def choice(self, *args, **kwargs):
-                    return self.base.choice(*args, **kwargs)
-
-                def normal(self, loc=0.0, scale=1.0, size=None):
-                    out = self.base.normal(loc, scale, size)
-                    return loc + (out - loc) * self.scale
-
-                def __getattr__(self, name):
-                    # delegate everything else (rand, randn, randint…)
-                    return getattr(self.base, name)
-
-            # stash for use in reset()
-            self._ScaledRandom = ScaledRandom
 
         self._env = suite.load(domain_name=domain_name, task_name=task_name)
 
@@ -193,17 +164,7 @@ class DeepMindControlSuite(Env):
         ) -> tuple[np.ndarray, dict[str, Any]]:
         assert options is None, "not supported"
 
-        if self.jitter_scale < 1.0:
-            # build a base RandomState from the seed (or fresh if no seed)
-            if isinstance(seed, np.random.RandomState):
-                base_rng = seed
-            else:
-                base_rng = np.random.RandomState(seed)
-            scaled = self._ScaledRandom(self.jitter_scale, base=base_rng)
-            # DM Control tasks look at `self._random` inside initialize_episode
-            self._env.task._random = scaled
-
-        elif seed is not None:
+        if seed is not None:
             if isinstance(seed, np.random.RandomState):
                 self._env.task._random = seed
             else:
