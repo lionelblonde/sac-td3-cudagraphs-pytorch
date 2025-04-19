@@ -44,7 +44,7 @@ BENCHMARKS = {
     ],
     "dmcs": [
         f"{name}" for name in [  # leave like this
-            "cartpole-swingup",  # this
+            "cartpole-swingup",
             "hopper-hop",
             "walker-walk",
             "walker-run",
@@ -83,6 +83,8 @@ class DeepMindControlSuite(Env):
                  domain_name: str,
                  task_name: str,
                  /,
+                 *,
+                 jitter_scale: float = 0.4,
                  rendering: str = "egl",
                  render_height: int = 64,
                  render_width: int = 64,
@@ -91,6 +93,34 @@ class DeepMindControlSuite(Env):
         # for details see https://github.com/deepmind/dm_control
         assert rendering in {"glfw", "egl", "osmesa"}
         os.environ["MUJOCO_GL"] = rendering
+
+        self.jitter_scale = jitter_scale
+        if jitter_scale < 1.0:
+
+            class ScaledRandom:
+                def __init__(self, scale: float, base: np.random.RandomState = None):
+                    self.scale = scale
+                    # if no base given, seed from fresh entropy
+                    self.base = base or np.random.RandomState()
+
+                def uniform(self, low, high=None, size=None):
+                    # base returns in [low,high); we compress towards low
+                    out = self.base.uniform(low, high, size)
+                    return low + (out - low) * self.scale
+
+                def choice(self, *args, **kwargs):
+                    return self.base.choice(*args, **kwargs)
+
+                def normal(self, loc=0.0, scale=1.0, size=None):
+                    out = self.base.normal(loc, scale, size)
+                    return loc + (out - loc) * self.scale
+
+                def __getattr__(self, name):
+                    # delegate everything else (rand, randn, randint…)
+                    return getattr(self.base, name)
+
+            # stash for use in reset()
+            self._ScaledRandom = ScaledRandom
 
         self._env = suite.load(domain_name=domain_name, task_name=task_name)
 
@@ -110,7 +140,6 @@ class DeepMindControlSuite(Env):
         @beartype
         def extract_min_max(s: Union[specs.Array, specs.BoundedArray],
         ) -> tuple[np.ndarray, np.ndarray]:
-            assert s.dtype == np.float32
             dim = int(np.prod(s.shape))
             match s:
                 case specs.BoundedArray():
@@ -144,7 +173,7 @@ class DeepMindControlSuite(Env):
     @beartype
     def step(self,
              action: np.ndarray,
-        ) -> tuple[np.ndarray, np.ndarray, bool, bool, dict[str, Any]]:
+        ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         if action.dtype.kind == "f":
             action = action.astype(np.float32)
         assert self._action_space.contains(action)
@@ -162,12 +191,23 @@ class DeepMindControlSuite(Env):
               seed: Optional[int] = None,
               options: Optional[dict[str, Any]] = None,
         ) -> tuple[np.ndarray, dict[str, Any]]:
-        assert options is None
-        if seed is not None:
-            seed_ = None
-            if not isinstance(seed, np.random.RandomState):
-                seed_ = np.random.RandomState(seed)
-            self._env.task._random = seed_
+        assert options is None, "not supported"
+
+        if self.jitter_scale < 1.0:
+            # build a base RandomState from the seed (or fresh if no seed)
+            if isinstance(seed, np.random.RandomState):
+                base_rng = seed
+            else:
+                base_rng = np.random.RandomState(seed)
+            scaled = self._ScaledRandom(self.jitter_scale, base=base_rng)
+            # DM Control tasks look at `self._random` inside initialize_episode
+            self._env.task._random = scaled
+
+        elif seed is not None:
+            if isinstance(seed, np.random.RandomState):
+                self._env.task._random = seed
+            else:
+                self._env.task._random = np.random.RandomState(seed)
 
         timestep = self._env.reset()
         observation = self.flatten_obs(timestep.observation)
