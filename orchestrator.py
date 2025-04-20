@@ -338,12 +338,6 @@ def train(cfg: DictConfig,
                     "return": torch.tensor(np.array(list(ret_buff)), dtype=torch.float).mean(),
                 }
 
-            if (new_best := eval_metrics["return"].item()) > agent.best_eval_ep_ret:
-                # save the new best model
-                agent.best_eval_ep_ret = new_best
-                agent.save(ckpt_dir, sfx="best")
-                logger.info(f"new best eval! -- saved model @: {ckpt_dir}")
-
             # log with logger
             logger.record_tabular("timestep", agent.timesteps_so_far)
             for k, v in eval_metrics.items():
@@ -351,6 +345,11 @@ def train(cfg: DictConfig,
             logger.dump_tabular()
 
             # log with wandb
+            if (new_best := eval_metrics["return"].item()) > agent.best_eval_ep_ret:
+                # save the new best model
+                logger.info("new best eval! -- saving model to disk and wandb")
+                agent.best_eval_ep_ret = new_best
+                agent.save(ckpt_dir, sfx="best")
             wandb.log(
                 {
                     **tlog.to_dict(),
