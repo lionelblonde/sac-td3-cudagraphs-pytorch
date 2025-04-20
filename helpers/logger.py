@@ -284,7 +284,7 @@ class Logger(object):
     def log(self, *args: Any, level: int = INFO):
         if self.level <= level:
             # if the current logger level is higher than
-            # the `level` argument, don"t print to stdout
+            # the `level` argument, don't print to stdout
             self._log(args)
 
     @beartype
