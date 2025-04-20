@@ -358,7 +358,7 @@ class Agent(object):
         if sfx == "best":
             # upload the model to wandb servers
             wandb.save(str(path), base_path=parent)
-            logger.info("model saved to wandb")
+            logger.warn("model saved to wandb")
 
     @beartype
     def load_from_disk(self, path: Path):
