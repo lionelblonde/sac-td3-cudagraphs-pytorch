@@ -231,10 +231,6 @@ def train(cfg: DictConfig,
     ckpt_dir = Path(cfg.checkpoint_dir) / name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    # save the model as a dry run, to avoid bad surprises at the end
-    agent.save(ckpt_dir, sfx="dryrun")
-    logger.info(f"dry run -- saved model @: {ckpt_dir}")
-
     # set up wandb
     os.environ["WANDB__SERVICE_WAIT"] = "300"
     group = ".".join(name.split(".")[:-1])  # everything in name except seed
@@ -379,10 +375,7 @@ def train(cfg: DictConfig,
         i += 1
         tlog.clear()
 
-    # save once we are done
-    agent.save(ckpt_dir, sfx="done")
-    logger.info(f"we are done -- saved model @: {ckpt_dir}")
-    # mark a run as finished, and finish uploading all data (from docs)
+    # mark the run as finished, and finish uploading all data (from docs)
     wandb.finish()
     logger.warn("bye")
 
