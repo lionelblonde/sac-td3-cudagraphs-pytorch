@@ -1,4 +1,5 @@
 import os
+os.environ["MUJOCO_GL"] = "egl"
 from typing import Union, Optional, Callable, Iterable, Any
 from pathlib import Path
 
@@ -84,14 +85,11 @@ class DeepMindControlSuite(Env):
                  task_name: str,
                  /,
                  *,
-                 rendering: str = "egl",
                  render_height: int = 64,
                  render_width: int = 64,
                  render_camera_id: int = 0):
 
         # for details see https://github.com/deepmind/dm_control
-        assert rendering in {"glfw", "egl", "osmesa"}
-        os.environ["MUJOCO_GL"] = rendering
 
         self._env = suite.load(domain_name=domain_name, task_name=task_name)
 

@@ -23,6 +23,7 @@ eval_every: 10000
 # evaluation mode
 num_episodes: 16
 gather_trajectories: false
+pixels_too: false
 
 # model
 layer_norm: true

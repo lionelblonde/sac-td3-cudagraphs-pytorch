@@ -123,11 +123,14 @@ def episode(env: Env,
             seed: int,
             *,
             need_lists: bool = False,
+            pixels_too: bool = False,
     ) -> Generator[dict[str, np.ndarray], None, None]:
     # generator that spits out a trajectory collected during a single episode
 
     # `append` operation is significantly faster on lists than numpy arrays,
     # they will be converted to numpy arrays once complete right before the yield
+
+    assert need_lists or not pixels_too  # pixels_too => need_lists
 
     rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
 
@@ -141,10 +144,18 @@ def episode(env: Env,
     rewards_list = []
     terminations_list = []
     dones_list = []
+    if pixels_too:
+        obs_pix_list = []
+        next_obs_pix_list = []
 
     ob, _ = env.reset(seed=randomize_seed())
+    if pixels_too:
+        (ob_pix,) = env.call("render")
+        ob_pix = rearrange(ob_pix, "h w c -> c h w")
     if need_lists:
         obs_list.append(ob)
+        if pixels_too:
+            obs_pix_list.append(ob_pix)
     ob = torch.as_tensor(ob, device=agent.device, dtype=torch.float)
 
     while True:
@@ -161,17 +172,24 @@ def episode(env: Env,
         )
 
         new_ob, reward, termination, truncation, infos = env.step(action)
+        if pixels_too:
+            (new_ob_pix,) = env.call("render")
+            new_ob_pix = rearrange(new_ob_pix, "h w c -> c h w")
 
         done = termination or truncation
 
         if need_lists:
             next_obs_list.append(new_ob)
+            if pixels_too:
+                next_obs_pix_list.append(new_ob_pix)
             actions_list.append(action)
             rewards_list.append(reward)
             terminations_list.append(termination)
             dones_list.append(done)
             if not done:
                 obs_list.append(new_ob)
+                if pixels_too:
+                    obs_pix_list.append(new_ob_pix)
 
         new_ob = torch.as_tensor(new_ob, device=agent.device, dtype=torch.float)
         ob = new_ob
@@ -193,6 +211,11 @@ def episode(env: Env,
                     "length": np.array(ep_len),
                     "return": np.array(ep_ret),
                 }
+                if pixels_too:
+                    out.update({
+                        "pix": np.array(obs_pix_list),
+                        "next_pix": np.array(next_obs_pix_list),
+                    })
             else:
                 out = {
                     "length": np.array(ep_len),
@@ -207,10 +230,18 @@ def episode(env: Env,
                 rewards_list = []
                 terminations_list = []
                 dones_list = []
+                if pixels_too:
+                    obs_pix_list = []
+                    next_obs_pix_list = []
 
             ob, _ = env.reset(seed=randomize_seed())
+            if pixels_too:
+                (ob_pix,) = env.call("render")
+                ob_pix = rearrange(ob_pix, "h w c -> c h w")
             if need_lists:
                 obs_list.append(ob)
+                if pixels_too:
+                    obs_pix_list.append(ob_pix)
             ob = torch.as_tensor(ob, device=agent.device, dtype=torch.float)
 
 
@@ -399,7 +430,7 @@ def evaluate(cfg: DictConfig,
 
     # create episode generator
     ep_gen = episode(
-        env, agent, cfg.seed, need_lists=cfg.gather_trajectories)
+        env, agent, cfg.seed, need_lists=cfg.gather_trajectories, pixels_too=cfg.pixels_too)
 
     pbar = tqdm.tqdm(range(cfg.num_episodes))
     pbar.set_description("evaluating")
