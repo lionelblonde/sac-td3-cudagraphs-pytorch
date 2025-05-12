@@ -1,6 +1,7 @@
 import os
 import time
 import tqdm
+from PIL import Image
 from pathlib import Path
 from typing import Union, Callable, Generator
 from contextlib import contextmanager
@@ -456,6 +457,14 @@ def evaluate(cfg: DictConfig,
                     td[k] = v.float()
             fname = trajectory_path / f"{name}.h5"
             td.to_h5(fname)  # can then easily load with `from_h5`
+
+            if cfg.pixels_too:
+                pix = ep["pix"]
+                for t in range(ep_len):
+                    frame = pix[t]  # is already channel-first
+                    img = Image.fromarray(frame)
+                    img_fname = trajectory_path / f"{name}_frame{t:03d}.jpg"
+                    img.save(img_fname)
 
     if trajectory_path is not None:
         logger.warn(f"saved trajectories @: {trajectory_path}")
