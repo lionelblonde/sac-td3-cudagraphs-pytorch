@@ -27,7 +27,6 @@ class Agent(object):
                  max_ac: np.ndarray,
                  device: torch.device,
                  hps: DictConfig,
-                 generator: torch.Generator,
                  rb: Optional[ReplayBuffer] = None):
         ob_shape, ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
 
@@ -58,8 +57,6 @@ class Agent(object):
         actor_net_kwargs = {"layer_norm": self.hps.layer_norm}
         if self.hps.prefer_td3_over_sac:
             actor_net_kwargs.update({"exploration_noise": self.hps.actor_noise_std})
-        else:
-            actor_net_kwargs.update({"generator": generator})
 
         self.actor = (Actor if self.hps.prefer_td3_over_sac else TanhGaussActor)(
             *actor_net_args, **actor_net_kwargs, device=self.device)

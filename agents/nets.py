@@ -169,13 +169,11 @@ class TanhGaussActor(nn.Module):
                  min_ac: torch.Tensor,
                  max_ac: torch.Tensor,
                  *,
-                 generator: torch.Generator,
                  layer_norm: bool,
                  device: Union[str, torch.device]):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
-        self.rng = generator
         self.layer_norm = layer_norm
 
         # assemble the last layers and output heads

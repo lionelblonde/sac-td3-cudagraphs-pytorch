@@ -145,7 +145,6 @@ class MagicRunner(object):
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
         torch.manual_seed(self._cfg.seed)
         device = self.setup_device()
-        generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
         # envs
         env, net_shapes, min_ac, max_ac = make_env(
@@ -179,7 +178,6 @@ class MagicRunner(object):
                 max_ac=max_ac,
                 device=device,
                 hps=self._cfg,
-                generator=generator,
                 rb=rb,
             )
 
@@ -213,7 +211,6 @@ class MagicRunner(object):
         random.seed(self._cfg.seed)  # after uuid creation, otherwise always same uuid
         torch.manual_seed(self._cfg.seed)
         device = self.setup_device()
-        generator = torch.Generator(device).manual_seed(self._cfg.seed)
 
         # env
         env, net_shapes, min_ac, max_ac = make_env(
@@ -235,7 +232,6 @@ class MagicRunner(object):
                 max_ac=max_ac,
                 device=device,
                 hps=self._cfg,
-                generator=generator,
             )
 
         # evaluate
